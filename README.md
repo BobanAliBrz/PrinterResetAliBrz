@@ -1,5 +1,9 @@
 # 🖨 Print Spooler Guardian
 
+> **⚠️ DISCLAIMER: Personal project for work use**
+>
+> This is a personal tool I built for my own IT admin job. It works for my environment (HP printers, old PCs, Windows 7-11). You're welcome to use it if it fits your needs, but this is **not a commercial product** — no guarantees, no support, no SLA. Fork it, tweak it, do whatever you want with it.
+
 **Zero-config USB & shared printer monitoring and auto-recovery for Windows.**
 
 Automatically detects when a USB or shared (UNC/network) printer gets stuck, and recovers it through escalating steps — from canceling stuck jobs to resetting the USB device.
