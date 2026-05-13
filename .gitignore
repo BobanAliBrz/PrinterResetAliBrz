@@ -45,3 +45,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Publish output (self-contained deployment)
+publish/
+
+# Release archives
+*.zip
