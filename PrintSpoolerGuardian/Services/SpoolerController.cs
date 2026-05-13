@@ -56,7 +56,7 @@ namespace PrintSpoolerGuardian
                         sc.WaitForStatus(ServiceControllerStatus.Stopped,
                             TimeSpan.FromSeconds(timeoutSeconds));
                     }
-                    catch (TimeoutException)
+                    catch (System.TimeoutException)
                     {
                         Logger.Warn($"Print Spooler did not stop within {timeoutSeconds}s, forcing...");
                         sc.Stop();

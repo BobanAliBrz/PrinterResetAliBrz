@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net48</TargetFramework>
+    <TargetFramework>net6.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>PrintSpoolerGuardian</AssemblyName>
@@ -9,9 +9,12 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="System" />
-    <Reference Include="System.Configuration" />
-    <Reference Include="System.Management" />
-    <Reference Include="System.Windows.Forms" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="4.1.0" />
+    <PackageReference Include="System.Management" Version="7.0.0" />
+  </ItemGroup>
+  <!-- Bootstrapper is a separate project - exclude from main build -->
+  <ItemGroup>
+    <Compile Remove="Bootstrapper\**" />
+    <EmbeddedResource Remove="Bootstrapper\**" />
   </ItemGroup>
 </Project>

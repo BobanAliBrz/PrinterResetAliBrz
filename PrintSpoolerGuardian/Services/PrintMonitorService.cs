@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Configuration;
+using System.Linq;
 using System.Management;
 using System.Threading;
 using System.Threading.Tasks;
@@ -74,7 +75,7 @@ namespace PrintSpoolerGuardian
                 : "";
 
             return $"Last check: {LastCheckTime:HH:mm:ss}, Recoveries: {RecoveriesThisHour}, " +
-                   $"State: {_recoveryEngine.IsInCooldown ? "COOLDOWN" : "ACTIVE"}, " +
+                   $"State: {(_recoveryEngine.IsInCooldown ? "COOLDOWN" : "ACTIVE")}, " +
                    $"Rate limit: {_recoveryEngine.IsRateLimited}{updateStatus}";
         }
 
@@ -271,7 +272,6 @@ namespace PrintSpoolerGuardian
         public async Task StopAsync()
         {
             _autoUpdater?.Stop();
-            _token?.Cancel();
             await Task.Delay(500);
         }
 

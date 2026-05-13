@@ -4,6 +4,7 @@ using System.Configuration;
 using System.Diagnostics;
 using System.Linq;
 using System.Management;
+using System.ServiceProcess;
 using System.Threading.Tasks;
 
 namespace PrintSpoolerGuardian
@@ -121,8 +122,7 @@ namespace PrintSpoolerGuardian
 
             // Step 4: USB device reset
             Logger.Info("Step 4/4: Resetting USB device...");
-            var deviceId = printer.DeviceInstanceId
-                ?? _detector.GetUsbDeviceInstanceId(printer.PortName);
+            var deviceId = _detector.GetUsbDeviceInstanceId(printer.PortName);
 
             if (!string.IsNullOrEmpty(deviceId))
             {
