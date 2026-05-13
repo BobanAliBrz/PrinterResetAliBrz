@@ -1,11 +1,10 @@
 using System;
-using System.Collections.Generic;
 using System.Configuration;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
-using System.Linq;
-using System.ServiceProcess;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -18,7 +17,6 @@ namespace PrintSpoolerGuardian
         private static ContextMenuStrip _trayMenu;
         private static PrintMonitorService _monitorService;
         private static CancellationTokenSource _cts;
-        private static bool _showWindow = false;
 
         [STAThread]
         static void Main()
@@ -32,6 +30,9 @@ namespace PrintSpoolerGuardian
             var logDir = ConfigurationManager.AppSettings["LogDirectory"] ?? @"C:\ProgramData\PrintSpoolerGuardian";
             if (!Directory.Exists(logDir))
                 Directory.CreateDirectory(logDir);
+
+            // Register for auto-start on all users (admin required)
+            RegisterStartup();
 
             // Start the monitoring service
             _monitorService = new PrintMonitorService();
@@ -58,7 +59,7 @@ namespace PrintSpoolerGuardian
 
             _trayIcon = new NotifyIcon
             {
-                Icon = SystemIcons.Information,
+                Icon = IconHelper.CreatePrinterIcon(),
                 ContextMenuStrip = _trayMenu,
                 Visible = true,
                 Text = "Print Spooler Guardian"
@@ -131,6 +132,53 @@ namespace PrintSpoolerGuardian
             {
                 menuItem.Enabled = true;
             });
+        }
+
+        /// <summary>
+        /// Creates a shortcut in the All Users Startup folder so the app
+        /// launches for every user at logon. Only runs when elevated.
+        /// </summary>
+        private static void RegisterStartup()
+        {
+            try
+            {
+                var isAdmin = new WindowsPrincipal(WindowsIdentity.GetCurrent())
+                    .IsInRole(WindowsBuiltInRole.Administrator);
+
+                if (!isAdmin)
+                {
+                    Logger.Debug("Not running as admin — skipping all-users startup registration");
+                    return;
+                }
+
+                var startupDir = Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup);
+                var shortcutPath = Path.Combine(startupDir, "Print Spooler Guardian.lnk");
+
+                if (File.Exists(shortcutPath))
+                {
+                    Logger.Debug("Startup shortcut already exists");
+                    return;
+                }
+
+                Logger.Info("Registering for auto-start on all users (Common Startup)...");
+
+                var exePath = Process.GetCurrentProcess().MainModule.FileName;
+                Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+                dynamic shell = Activator.CreateInstance(shellType);
+                dynamic shortcut = shell.CreateShortcut(shortcutPath);
+                shortcut.TargetPath = exePath;
+                shortcut.Description = "Print Spooler Guardian — printer auto-recovery";
+                shortcut.WorkingDirectory = Path.GetDirectoryName(exePath);
+                shortcut.Save();
+                Marshal.FinalReleaseComObject(shortcut);
+                Marshal.FinalReleaseComObject(shell);
+
+                Logger.Info("Startup shortcut created in: " + startupDir);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Could not register startup: {ex.Message}");
+            }
         }
 
         private static void ExitClick(object sender, EventArgs e)

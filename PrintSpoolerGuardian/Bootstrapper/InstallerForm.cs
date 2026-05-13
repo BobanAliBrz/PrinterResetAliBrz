@@ -155,19 +155,26 @@ namespace PrintSpoolerGuardian.Installer
             else
                 Log("  ✗ .NET Framework 4.8 NOT found — will install");
 
-            // Check if already installed
-            var existing = ServiceExists();
-            if (existing)
+            // Check if already installed (look for startup shortcut or exe)
+            var startupShortcut = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup),
+                "Print Spooler Guardian.lnk");
+            var exePath = Path.Combine(LocalInstallDir, "PrintSpoolerGuardian.exe");
+
+            if (File.Exists(startupShortcut) || File.Exists(exePath))
             {
-                Log($"  ✓ Service '{ServiceName}' exists");
-                var exePath = Path.Combine(LocalInstallDir, "PrintSpoolerGuardian.exe");
+                Log("  ✓ Existing installation detected");
                 if (File.Exists(exePath))
-                    Log($"  ✓ Executable found: v{GetFileVersion(exePath)}");
+                    Log($"  ✓ Version: {GetFileVersion(exePath)}");
             }
             else
             {
-                Log($"  → Service '{ServiceName}' not installed yet");
+                Log("  → Not installed yet");
             }
+
+            // Also check for old service (migration)
+            if (ServiceExists())
+                Log("  ⚠ Old Windows Service found — will be removed during install");
         }
 
         private bool IsNet48Installed()
@@ -348,39 +355,7 @@ namespace PrintSpoolerGuardian.Installer
                     File.Delete(zipPath);
                 }
 
-                // Step 4: Install/Update Windows Service
-                SetStatus("Installing Windows Service...", 70);
-                Log("Installing Windows Service...");
-
-                // Stop existing service if running
-                try
-                {
-                    using (var sc = new ServiceController(ServiceName))
-                    {
-                        if (sc.Status == ServiceControllerStatus.Running)
-                        {
-                            Log("  Stopping existing service...");
-                            sc.Stop();
-                            sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
-                        }
-                        Log("  Uninstalling old service...");
-                        sc.Stop();
-                    }
-
-                    // Delete the old service
-                    var psi = new ProcessStartInfo("sc.exe", $"delete {ServiceName}")
-                    {
-                        UseShellExecute = true,
-                        Verb = "runas",
-                        CreateNoWindow = true
-                    };
-                    Process.Start(psi)?.WaitForExit();
-                }
-                catch { /* Service may not exist yet */ }
-
-                await Task.Delay(1000);
-
-                // Install the new service
+                // Step 4: Find the main executable
                 var exeFullPath = Path.Combine(LocalInstallDir, "PrintSpoolerGuardian.exe");
                 if (!File.Exists(exeFullPath))
                 {
@@ -388,7 +363,6 @@ namespace PrintSpoolerGuardian.Installer
                     var exes = Directory.GetFiles(LocalInstallDir, "PrintSpoolerGuardian.exe", SearchOption.AllDirectories);
                     if (exes.Length > 0)
                     {
-                        // Move to root
                         File.Copy(exes[0], exeFullPath, true);
                         if (exes[0] != exeFullPath) File.Delete(exes[0]);
                     }
@@ -402,55 +376,74 @@ namespace PrintSpoolerGuardian.Installer
                     }
                 }
 
-                psi = new ProcessStartInfo("sc.exe")
-                {
-                    Arguments = $"create {ServiceName} binPath= \"\\\"{exeFullPath}\\\"\" start= auto",
-                    UseShellExecute = true,
-                    Verb = "runas",
-                    CreateNoWindow = true
-                };
-                var result = Process.Start(psi);
-                result?.WaitForExit();
-
-                if (result?.ExitCode == 0)
-                {
-                    // Set failure recovery actions
-                    Process.Start(new ProcessStartInfo("sc.exe",
-                        $"failure {ServiceName} reset= 86400 actions= restart/60000/restart/60000/restart/60000")
-                    { UseShellExecute = true, Verb = "runas", CreateNoWindow = true })?.WaitForExit();
-
-                    // Set description
-                    Process.Start(new ProcessStartInfo("sc.exe",
-                        $"description {ServiceName} \"Auto-recovers stuck USB print jobs\"")
-                    { UseShellExecute = true, Verb = "runas", CreateNoWindow = true })?.WaitForExit();
-
-                    Log("  ✓ Service installed successfully");
-                }
-                else
-                {
-                    Log($"  ✗ Service install failed (exit code {result?.ExitCode})");
-                    Log("  Try running this installer as Administrator");
-                }
-
-                // Step 5: Start the service
-                Log("Starting Print Spooler Guardian...");
-                SetStatus("Starting service...", 85);
+                // Step 5: Clean up old service installation if present (migration)
                 try
                 {
-                    using (var sc = new ServiceController(ServiceName))
+                    var existingServices = System.ServiceProcess.ServiceController.GetServices();
+                    if (existingServices.Any(s => s.ServiceName == ServiceName))
                     {
-                        sc.Start();
-                        sc.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
+                        Log("Removing old Windows Service installation...");
+                        // Stop it first
+                        using (var sc = new System.ServiceProcess.ServiceController(ServiceName))
+                        {
+                            if (sc.Status == System.ServiceProcess.ServiceControllerStatus.Running)
+                            {
+                                sc.Stop();
+                                sc.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(15));
+                            }
+                        }
+                        Process.Start(new ProcessStartInfo("sc.exe", $"delete {ServiceName}")
+                        { UseShellExecute = true, Verb = "runas", CreateNoWindow = true })?.WaitForExit(10000);
+                        await Task.Delay(1000);
+                        Log("  ✓ Old service removed");
                     }
-                    Log("  ✓ Service started!");
+                }
+                catch { /* No existing service */ }
+
+                // Step 6: Register in All Users Startup folder
+                SetStatus("Registering auto-start...", 80);
+                Log("Registering for auto-start on all users...");
+                try
+                {
+                    var startupDir = Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup);
+                    var shortcutPath = Path.Combine(startupDir, "Print Spooler Guardian.lnk");
+
+                    Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+                    dynamic shell = Activator.CreateInstance(shellType);
+                    dynamic shortcut = shell.CreateShortcut(shortcutPath);
+                    shortcut.TargetPath = exeFullPath;
+                    shortcut.Description = "Print Spooler Guardian — printer auto-recovery";
+                    shortcut.WorkingDirectory = LocalInstallDir;
+                    shortcut.Save();
+                    Marshal.FinalReleaseComObject(shortcut);
+                    Marshal.FinalReleaseComObject(shell);
+
+                    Log("  ✓ Startup shortcut created: " + shortcutPath);
                 }
                 catch (Exception ex)
                 {
-                    Log($"  ⚠ Service started but status check failed: {ex.Message}");
-                    Log("  This may resolve after a moment.");
+                    Log($"  ✗ Failed to create startup shortcut: {ex.Message}");
                 }
 
-                // Step 6: Create shortcut
+                // Step 7: Launch the app now
+                SetStatus("Starting...", 90);
+                Log("Starting Print Spooler Guardian...");
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = exeFullPath,
+                        UseShellExecute = true,
+                        Verb = "runas"
+                    });
+                    Log("  ✓ Launched successfully");
+                }
+                catch (Exception ex)
+                {
+                    Log($"  ⚠ Could not launch: {ex.Message} (will start on next logon)");
+                }
+
+                // Step 8: Create desktop shortcut
                 SetStatus("Creating shortcuts...", 95);
                 CreateDesktopShortcut();
 
@@ -458,13 +451,14 @@ namespace PrintSpoolerGuardian.Installer
                 Log("");
                 Log("============================================");
                 Log("  ✓ INSTALLATION COMPLETE");
-                Log($"  Service running: {ServiceName}");
-                Log($"  Files in: {LocalInstallDir}");
+                Log($"  App running: {LocalInstallDir}\\PrintSpoolerGuardian.exe");
+                Log($"  Auto-start: All Users Startup folder (every user)");
                 Log($"  Log file: {Path.Combine(LocalInstallDir, "PrintSpoolerGuardian.log")}");
+                Log($"  Tray icon: bottom-right system tray");
                 Log("============================================");
                 Log("");
-                Log("The service is monitoring all USB printers automatically.");
-                Log("Check the service status via Services.msc or the tray icon.");
+                Log("Print Spooler Guardian is now running.");
+                Log("It will auto-start for every user at logon.");
             }
             finally
             {
@@ -475,7 +469,8 @@ namespace PrintSpoolerGuardian.Installer
 
         private void UninstallBtn_Click(object sender, EventArgs e)
         {
-            var confirm = MessageBox.Show("Remove Print Spooler Guardian completely?",
+            var confirm = MessageBox.Show("Remove Print Spooler Guardian completely?" + Environment.NewLine +
+                "This will: stop the app, remove the startup registration, and delete all files.",
                 "Confirm Uninstall", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (confirm != DialogResult.Yes) return;
 
@@ -484,42 +479,68 @@ namespace PrintSpoolerGuardian.Installer
 
             Log("Uninstalling...");
 
-            // Stop service
+            // Remove All Users Startup shortcut
             try
             {
-                using (var sc = new ServiceController(ServiceName))
-                {
-                    sc.Stop();
-                    sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(15));
-                }
-                Process.Start(new ProcessStartInfo("sc.exe", $"delete {ServiceName}")
-                { UseShellExecute = true, Verb = "runas", CreateNoWindow = true })?.WaitForExit();
-                Log("  ✓ Service removed");
+                var startupShortcut = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup),
+                    "Print Spooler Guardian.lnk");
+                if (File.Exists(startupShortcut)) File.Delete(startupShortcut);
+                Log("  ✓ Startup shortcut removed");
             }
-            catch { Log("  ⚠ Service was not installed or already removed"); }
+            catch (Exception ex)
+            {
+                Log($"  ⚠ Could not remove startup shortcut: {ex.Message}");
+            }
 
-            // Remove files
+            // Remove desktop shortcut
+            try
+            {
+                var desktopShortcut = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                    "Print Spooler Guardian.lnk");
+                if (File.Exists(desktopShortcut)) File.Delete(desktopShortcut);
+            }
+            catch { /* ignore */ }
+
+            // Try to stop any running instance
+            try
+            {
+                foreach (var proc in Process.GetProcessesByName("PrintSpoolerGuardian"))
+                {
+                    proc.Kill();
+                    Log("  ✓ Stopped running instance");
+                }
+            }
+            catch { Log("  ⚠ Could not stop running instance"); }
+
+            // Remove install directory
             try
             {
                 if (Directory.Exists(LocalInstallDir))
                 {
-                    Directory.Delete(LocalInstallDir, true);
+                    // Retry a few times in case files are locked
+                    for (int i = 0; i < 3; i++)
+                    {
+                        try
+                        {
+                            Directory.Delete(LocalInstallDir, true);
+                            break;
+                        }
+                        catch
+                        {
+                            if (i < 2) System.Threading.Thread.Sleep(2000);
+                            else throw;
+                        }
+                    }
                     Log($"  ✓ Removed {LocalInstallDir}");
                 }
             }
             catch (Exception ex)
             {
-                Log($"  ⚠ Could not remove files: {ex.Message}");
+                Log($"  ⚠ Could not remove files (may be in use): {ex.Message}");
+                Log("  Please delete manually: " + LocalInstallDir);
             }
-
-            // Remove shortcut
-            try
-            {
-                var shortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-                    "Print Spooler Guardian.lnk");
-                if (File.Exists(shortcut)) File.Delete(shortcut);
-            }
-            catch { /* ignore */ }
 
             Log("");
             Log("  Uninstallation complete.");

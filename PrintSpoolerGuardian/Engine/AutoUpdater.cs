@@ -6,7 +6,6 @@ using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Reflection;
-using System.ServiceProcess;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -257,17 +256,21 @@ namespace PrintSpoolerGuardian
         {
             try
             {
-                // Stop the current service, the bootstrapper will restart it
-                using (var sc = new ServiceController("PrintSpoolerGuardian"))
+                // Start a new instance (picks up the updated binary)
+                var exePath = Assembly.GetExecutingAssembly().Location;
+                Process.Start(new ProcessStartInfo
                 {
-                    sc.Stop();
-                    sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(15));
-                    sc.Start();
-                }
+                    FileName = exePath,
+                    UseShellExecute = true,
+                    Verb = "runas"
+                });
+
+                // Kill this instance
+                Environment.Exit(0);
             }
             catch (Exception ex)
             {
-                Logger.Error($"Failed to restart service after update: {ex.Message}");
+                Logger.Error($"Failed to restart after update: {ex.Message}");
             }
         }
     }

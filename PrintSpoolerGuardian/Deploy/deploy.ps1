@@ -203,7 +203,7 @@ function Update-AppConfig {
     $xml.Save($configPath)
 }
 
-function Install-Service {
+function Install-Startup {
     param([string]$dir)
 
     $exePath = Join-Path $dir "PrintSpoolerGuardian.exe"
@@ -212,62 +212,67 @@ function Install-Service {
         return $false
     }
 
-    # Uninstall existing service first
-    Log "Removing existing service (if any)..."
-    & sc.exe delete $ServiceName 2>$null
-    Start-Sleep 2
+    # Clean up old service installation if present (migration from v1)
+    $existingSvc = Get-Service $ServiceName -ErrorAction SilentlyContinue
+    if ($existingSvc) {
+        Log "Removing old Windows Service installation..."
+        & sc.exe delete $ServiceName 2>$null
+        Start-Sleep 2
+        Log "  ✓ Old service removed"
+    }
 
-    # Install service
-    Log "Installing Windows Service..."
-    $result = & sc.exe create $ServiceName binPath= "`"$exePath`"" start= auto
-    if ($LASTEXITCODE -ne 0) {
-        Log "  ✗ Service creation failed: $result"
+    # Create All Users Startup shortcut so every user gets it at logon
+    Log "Registering for auto-start on all users..."
+    $startupDir = [Environment]::GetFolderPath("CommonStartup")
+    $shortcutPath = Join-Path $startupDir "Print Spooler Guardian.lnk"
+
+    try {
+        $ws = New-Object -ComObject WScript.Shell
+        $sc = $ws.CreateShortcut($shortcutPath)
+        $sc.TargetPath = $exePath
+        $sc.Description = "Print Spooler Guardian — printer auto-recovery"
+        $sc.WorkingDirectory = $dir
+        $sc.Save()
+        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($sc) | Out-Null
+        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($ws) | Out-Null
+        Log "  ✓ Startup shortcut created: $shortcutPath"
+    } catch {
+        Log "  ✗ Failed to create startup shortcut: $_"
         return $false
     }
 
-    # Set failure recovery
-    & sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/60000 2>$null
-    & sc.exe description $ServiceName "Monitors USB printers and auto-recovers stuck print jobs" 2>$null
-
-    Log "  ✓ Service installed"
-
-    # Start service
-    Log "Starting service..."
+    # Launch the app now (so admin doesn't have to log off/on)
+    Log "Starting Print Spooler Guardian..."
     try {
-        Start-Service $ServiceName -ErrorAction Stop
-        Start-Sleep 3
-        $svc = Get-Service $ServiceName
-        if ($svc.Status -eq 'Running') {
-            Log "  ✓ Service is running"
-            return $true
-        } else {
-            Log "  ⚠ Service status: $($svc.Status)"
-            return $true
-        }
+        Start-Process -FilePath $exePath -Verb RunAs -WindowStyle Hidden
+        Log "  ✓ Launched successfully"
     } catch {
-        Log "  ⚠ Could not start service: $_. The service is installed and will auto-start on reboot."
-        return $true
+        Log "  ⚠ Could not launch (will auto-start on next logon): $_"
     }
+
+    return $true
 }
 
-function Create-Shortcut {
+function Create-DesktopShortcut {
     param([string]$dir)
 
     $target = Join-Path $dir "PrintSpoolerGuardian.exe"
     $shortcutPath = Join-Path ([Environment]::GetFolderPath("Desktop")) "Print Spooler Guardian.lnk"
 
+    if (Test-Path $shortcutPath) { return }
+
     try {
         $ws = New-Object -ComObject WScript.Shell
         $sc = $ws.CreateShortcut($shortcutPath)
         $sc.TargetPath = $target
-        $sc.Description = "Print Spooler Guardian - USB printer monitoring"
+        $sc.Description = "Print Spooler Guardian — printer auto-recovery"
         $sc.IconLocation = "$target,0"
         $sc.Save()
         [System.Runtime.Interopservices.Marshal]::ReleaseComObject($sc) | Out-Null
         [System.Runtime.Interopservices.Marshal]::ReleaseComObject($ws) | Out-Null
         Log "  ✓ Desktop shortcut created"
     } catch {
-        Log "  ⚠ Could not create shortcut: $_"
+        Log "  ⚠ Could not create desktop shortcut: $_"
     }
 }
 
@@ -306,28 +311,31 @@ if (!$installDir) {
 # Step 3: Update config
 Update-AppConfig -dir $installDir
 
-# Step 4: Install service
-if (!(Install-Service -dir $installDir)) {
-    Log "ERROR: Service installation failed."
+# Step 4: Register startup (All Users Startup folder)
+if (!(Install-Startup -dir $installDir)) {
+    Log "ERROR: Startup registration failed."
     if (!$Silent) { Read-Host "Press Enter to exit" }
     exit 1
 }
 
-# Step 5: Create shortcut (skip in silent mode)
+# Step 5: Create desktop shortcut (skip in silent mode)
 if (!$Silent) {
-    Create-Shortcut -dir $installDir
+    Create-DesktopShortcut -dir $installDir
 }
 
 Write-Host ""
 Log "═══════════════════════════════════════════════════════════"
 Log "  ✓ DEPLOYMENT COMPLETE"
-Log "  Service:    $ServiceName"
 Log "  Location:   $InstallDir"
 Log "  Log file:   $InstallDir\PrintSpoolerGuardian.log"
+Log "  Auto-start: All Users Startup folder (every user)"
 Log "═══════════════════════════════════════════════════════════"
 Log ""
-Log "The service will monitor ALL USB printers automatically."
-Log "Edit $(Join-Path $InstallDir 'app.config') to customize settings."
+Log "Print Spooler Guardian is now running. It will auto-start"
+Log "for every user at logon. Edit app.config to customize."
+Log ""
+Log "To stop: right-click the tray icon and select Exit."
+Log "To uninstall: delete the startup shortcut + install folder."
 
 if (!$Silent) {
     Read-Host "Press Enter to exit"

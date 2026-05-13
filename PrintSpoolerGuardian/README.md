@@ -1,10 +1,10 @@
 # Print Spooler Guardian
 
-A lightweight Windows Service that monitors USB-connected printers and automatically recovers stuck print jobs.
+A lightweight Windows app that monitors USB and shared printers and automatically recovers stuck print jobs.
 
 ## Problem It Solves
 
-USB printers (especially HP M404dn, P1000 series, Lexmark MS310, Brother) sometimes enter a broken state where jobs get stuck, the print spooler hangs, or the printer stops responding. This tool detects that and fixes it automatically — no manual intervention required.
+USB printers (especially HP M404dn, P1000 series) sometimes enter a broken state where jobs get stuck, the print spooler hangs, or the printer stops responding. This tool detects that and fixes it automatically — no manual intervention required.
 
 ## How It Works
 
@@ -25,9 +25,8 @@ USB printers (especially HP M404dn, P1000 series, Lexmark MS310, Brother) someti
 │  │ Polling  │    │ Escalation│    │           │ │
 │  └──────────┘    └───────────┘    └───────────┘ │
 │                                                   │
-│  ┌─────────────────────────────────────────────┐ │
-│  │           Logging (Event Log + File)        │ │
 │  └─────────────────────────────────────────────┘ │
+│           File Logging + Tray Icon                │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -35,9 +34,9 @@ USB printers (especially HP M404dn, P1000 series, Lexmark MS310, Brother) someti
 
 | Method | What It Catches |
 |--------|-----------------|
-| **Event Log** subscription | Real-time print errors (Event IDs 316, 368, 371-376) |
+| **WMI events** (realtime) | Print job state changes |
 | **WMI polling** (every 30s) | Jobs with Error/Blocked/PaperOut/NotPrinted status |
-| **Printer state** (WMI) | Printers in Error (3), Pending Deletion (4), Unknown (7) state |
+| **Printer state** (WMI) | Printers in Error (3), Pending Deletion (4), Unknown (7) |
 | **Stale file scan** | Orphaned `.SPL`/`.SHD` files in spool directory |
 
 ### Recovery (4-step escalation)
@@ -45,7 +44,9 @@ USB printers (especially HP M404dn, P1000 series, Lexmark MS310, Brother) someti
 1. **Cancel stuck jobs** — Delete errored jobs from queue
 2. **Clean stale files** — Remove orphaned `.SPL`/`.SHD` files
 3. **Restart Print Spooler** — Stop/Start the Spooler service
-4. **Reset USB device** — Disable/Enable the printer via PnP (simulates replugging the USB)
+4. **Reset USB device** — PnP Disable/Enable (simulates replugging the USB)
+
+For **shared printers** (UNC), step 4 is replaced with disconnecting and reconnecting the network path via `net use`.
 
 Only escalates if the previous step didn't fix the problem.
 
@@ -54,62 +55,62 @@ Only escalates if the previous step didn't fix the problem.
 - **Cooldown**: 10 minutes between recovery cycles (configurable)
 - **Rate limit**: Max 3 recoveries per hour
 - **Duplicate prevention**: Same job won't trigger recovery twice within 10 minutes
-- **Per-printer**: Only targets individual problem printers, never system-wide
-- **Admin manifest**: Requires admin rights (UAC prompt on install)
+- **Per-printer targeting**: Only affects the stuck printer, never system-wide
+- **Admin required**: UAC prompt — the app needs admin rights to restart the spooler and reset USB devices
 
 ## Requirements
 
 | Requirement | Details |
 |---|---|
 | **OS** | Windows 7 / 8 / 8.1 / 10 / 11 |
-| **.NET** | .NET Framework 4.8 (installed automatically by deploy script) |
-| **Permissions** | Administrator (needed for service install, USB device reset, printer re-add) |
+| **.NET** | Self-contained build includes .NET 6.0 runtime (nothing to install) |
+| **Permissions** | Administrator (for spooler restart, USB device reset, printer re-add) |
 | **RAM** | ~30 MB |
 | **CPU** | Negligible — just WMI queries every 30s |
 
-## Supported Printer Connection Types
+## Supported Printer Types
 
 | Type | Examples | Recovery Method |
 |------|----------|-----------------|
-| **USB** | HP M404dn, P1000 series (direct USB) | PnP disable/enable (simulates replug) |
-| **Shared (UNC)** | `\\printserver\printername` | Disconnect mapped drive → reconnect |
+| **USB** | Any printer connected via USB | PnP disable/enable (simulates replug) |
+| **Shared (UNC)** | `\\printserver\printername` | `net use` disconnect → reconnect |
+| **Network / TCP-IP** | Printers on raw IP ports | Not targeted (don't have this problem) |
 
 All types are **auto-detected** — no manual configuration needed.
 
+---
+
 ## Installation
 
-### Quick Install (PowerShell as Administrator)
+### Quick Start — Download & Run
+
+1. Download the ZIP from [Releases](https://github.com/BobanAliBrz/PrinterResetAliBrz/releases)
+2. Extract it anywhere
+3. Right-click `PrintSpoolerGuardian.exe` → **Run as Administrator**
+
+A printer icon appears in the system tray. It auto-registers to start for all users on next login.
+
+### Mass Deployment (SCCM / PDQ / Intune)
 
 ```powershell
-cd C:\path\to\PrintSpoolerGuardian
-.\Deploy\deploy.ps1
+.\Deploy\deploy.ps1 -Silent -GitHubRepo "BobanAliBrz/PrinterResetAliBrz"
 ```
 
-### Silent Install (SCCM / PDQ / Intune)
+### Build from Source
 
 ```powershell
-.\Deploy\deploy.ps1 -Silent -GitHubRepo "YourOrg/PrintSpoolerGuardian"
+dotnet publish -c Release -r win-x64 --self-contained -o .\publish
 ```
 
-### Manual Install
+### Auto-Start
 
-```powershell
-# Build (if building from source)
-cd PrintSpoolerGuardian
-dotnet publish -c Release -r win-x64 --self-contained -o C:\ProgramData\PrintSpoolerGuardian
+The app registers itself in the **All Users Startup folder** (`CommonStartup`) when first run as Administrator — no service setup needed. Every user on the machine gets it at login.
 
-# Install as service
-sc.exe create PrintSpoolerGuardian binPath= "C:\ProgramData\PrintSpoolerGuardian\PrintSpoolerGuardian.exe" start= auto
-sc.exe failure PrintSpoolerGuardian reset= 86400 actions= restart/60000/restart/60000/restart/60000
-sc.exe description PrintSpoolerGuardian "Monitors USB printers and auto-recovers stuck print jobs"
+---
 
-# Start
-Start-Service PrintSpoolerGuardian
-```
+## Configuration
 
-### Configure
-
-Edit `C:\ProgramData\PrintSpoolerGuardian\app.config` (or the `app.config` before building):
+Edit the `app.config` next to the executable:
 
 ```xml
 <printGuardian>
@@ -119,99 +120,93 @@ Edit `C:\ProgramData\PrintSpoolerGuardian\app.config` (or the `app.config` befor
   <add key="CooldownMinutes" value="10" />               <!-- Gap between recovery attempts -->
   <add key="MaxRecoveriesPerHour" value="3" />           <!-- Max recoveries per hour -->
   <add key="UsbResetWaitSeconds" value="15" />           <!-- Wait after USB toggle -->
-  <add key="WatchedPrinters" value="" />                 <!-- Semicolon-separated list; empty = all -->
+  <add key="UpdateGitHubRepo" value="BobanAliBrz/PrinterResetAliBrz" />
+  <add key="WatchedPrinters" value="" />                 <!-- Semicolon-separated; empty = all -->
 </printGuardian>
 ```
 
-**To target specific printers:**
+**To target specific printers only:**
 ```xml
 <add key="WatchedPrinters" value="HP LaserJet Pro M404dn;HP LaserJet Pro P1102" />
 ```
 
+---
+
 ## Uninstall
 
-Use the deploy script:
+1. Right-click tray icon → **Exit**
+2. Delete `C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\Print Spooler Guardian.lnk`
+3. Delete `C:\ProgramData\PrintSpoolerGuardian\`
 
-```powershell
-.\Deploy\deploy.ps1  # Follow the uninstall prompts
-```
+Or use the bootstrapper installer's **Uninstall** button.
 
-Or manually:
+---
 
-```powershell
-# Stop and remove the service
-Stop-Service PrintSpoolerGuardian
-sc.exe delete PrintSpoolerGuardian
+## System Tray
 
-# Remove files
-Remove-Item C:\ProgramData\PrintSpoolerGuardian -Recurse -Force
-```
+The printer icon in the system tray provides:
 
-## Running Without Installing (Testing)
+| Action | What it does |
+|---|---|
+| Double-click | Show status popup |
+| Right-click → Show Status | Current state, last check, recoveries this hour |
+| Right-click → Run Recovery Now | Force a full recovery cycle |
+| Right-click → Pause Monitoring (30min) | Silence for 30 minutes |
+| Right-click → Exit | Stop the app |
 
-Just run the `.exe` directly — it'll show a system tray icon with status. Right-click for options:
-- **Show Status** — View current state
-- **Run Recovery Now** — Force a recovery cycle
-- **Pause Monitoring (30min)** — Temporarily disable auto-recovery
-- **Exit** — Stop and quit
+---
 
 ## Logs
 
 Log file: `C:\ProgramData\PrintSpoolerGuardian\PrintSpoolerGuardian.log`
 
-Logs auto-rotate when exceeding 5 MB.
+Auto-rotates when exceeding 5 MB.
 
-## System Tray
+---
 
-The tray icon provides at-a-glance status:
-- Double-click for detailed status popup
-- Right-click for manual controls
+## Compatibility Notes (Your Environment)
 
-## Compatibility Notes for Your Environment
+- **HP M404dn / P1000 series**: These use standard HP USB printing. The PnP disable/enable works cleanly.
+- **Windows 7**: Self-contained .NET 6.0 build works on Win7 with no extra runtime install.
+- **Celeron E3300 + HDD**: Uses ~30 MB RAM, minimal CPU. WMI queries every 30s are lightweight.
+- **Auto-updates**: Checks GitHub every 24h. Just upload a new release and all PCs update themselves.
 
-- **HP M404dn / P1000 series**: These use standard HP USB printing. The PnP disable/enable works cleanly with them.
-- **Windows 7**: .NET Framework 4.8 must be installed (available via Windows Update). If your Win7 machines are offline, pre-install .NET 4.8 before deploying.
-- **Celeron E3300 + HDD**: The service uses ~30 MB RAM and minimal CPU. WMI queries every 30s are lightweight. No performance concerns.
-- **Older Win7 boxes**: If `.NET 4.8` isn't available, this can be compiled for `.NET 4.0` with minor changes (just remove `async/await` and use synchronous methods). Let me know if you need that.
+---
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| Service won't start | Check log at `C:\ProgramData\PrintSpoolerGuardian\` |
-| USB reset fails | Run manually as admin; check Device Manager for the printer |
-| False positives | Increase `StaleJobThresholdSeconds` or add printer to `WatchedPrinters` list |
+| App won't start | Run as Administrator (right-click → Run as admin) |
+| USB reset fails | Check Device Manager — is the printer showing up? |
+| False positives | Increase `StaleJobThresholdSeconds` or set `WatchedPrinters` |
 | Spooler keeps failing | Check `C:\Windows\System32\spool\PRINTERS\` for corrupt files manually |
+
+---
 
 ## Project Structure
 
 ```
 PrintSpoolerGuardian/
-├── PrintSpoolerGuardian/                   # Main Windows Service
-│   ├── PrintSpoolerGuardian.csproj         # .NET Framework 4.8
-│   ├── app.config                          # All settings (defaults = zero-config)
-│   ├── app.manifest                        # Admin rights + Win7 compat
-│   ├── Program.cs                          # Entry point + system tray icon
-│   ├── Engine/
-│   │   ├── RecoveryEngine.cs               # 4-step recovery escalation (USB + Shared)
-│   │   └── AutoUpdater.cs                  # GitHub-based auto-update
-│   ├── Helpers/
-│   │   └── Logger.cs                       # File logger with auto-rotation
-│   ├── Models/
-│   │   └── PrintJobInfo.cs                 # Data models + PrinterConnectionType enum
-│   └── Services/
-│       ├── PrintMonitorService.cs          # Main loop (WMI events + polling)
-│       ├── PrintJobDetector.cs             # WMI queries (all printer types)
-│       ├── SpoolerController.cs            # Spooler service control
-│       └── StaleFileCleaner.cs             # Orphaned file cleanup
-│
-├── Bootstrapper/                           # Standalone installer (.exe)
-│   ├── Bootstrapper.csproj
-│   └── InstallerForm.cs                    # GUI: .NET check → GitHub download → service install
-│
-├── Deploy/
-│   └── deploy.ps1                          # Mass deployment (SCCM/PDQ/Intune ready)
-│
-├── DESIGN.md                               # Full architecture document
-└── README.md                               # This file
+├── Program.cs                          # Entry point + tray icon
+├── app.config                          # All settings (defaults = zero-config)
+├── app.manifest                        # Admin rights + Win7-11 compat
+├── Engine/
+│   ├── RecoveryEngine.cs               # 4-step recovery escalation
+│   └── AutoUpdater.cs                  # GitHub-based auto-update
+├── Helpers/
+│   ├── Logger.cs                       # File logger with auto-rotation
+│   └── IconHelper.cs                   # Tray printer icon (drawn in code)
+├── Models/
+│   └── PrintJobInfo.cs                 # Data models + PrinterConnectionType enum
+├── Services/
+│   ├── PrintMonitorService.cs          # Main loop (WMI events + polling)
+│   ├── PrintJobDetector.cs             # WMI queries (all printer types)
+│   ├── SpoolerController.cs            # Spooler stop/start/restart
+│   ├── UsbPrinterResetter.cs           # USB PnP disable/enable
+│   └── StaleFileCleaner.cs             # Orphaned SPL/SHD cleanup
+├── Bootstrapper/                       # GUI installer (.exe)
+├── Deploy/                             # Mass deployment script
+├── DESIGN.md                           # Full architecture document
+└── README.md                           # This file
 ```
