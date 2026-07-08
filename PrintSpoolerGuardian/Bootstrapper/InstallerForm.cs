@@ -24,7 +24,7 @@ namespace PrintSpoolerGuardian.Installer
         private Label _statusLabel;
         private Label _titleLabel;
 
-        private const string DefaultRepo = "YOURORG/PrintSpoolerGuardian";
+        private const string DefaultRepo = "BobanAliBrz/PrinterResetAliBrz";
         private const string ServiceName = "PrintSpoolerGuardian";
         private const string LocalInstallDir = @"C:\ProgramData\PrintSpoolerGuardian";
 
@@ -246,9 +246,21 @@ namespace PrintSpoolerGuardian.Installer
                     SetStatus("Installing .NET Framework 4.8...", 5);
 
                     var ndpPath = Path.Combine(Path.GetTempPath(), "ndp48-web.exe");
-                    using (var wc = new WebClient())
+                    try
                     {
-                        wc.DownloadFile("https://go.microsoft.com/fwlink/?linkid=2088631", ndpPath);
+                        using (var wc = new WebClient())
+                        {
+                            // Force TLS 1.2 — old Win7 may default to TLS 1.0/1.1 which GitHub rejects
+                            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+                            wc.DownloadFile("https://go.microsoft.com/fwlink/?linkid=2088631", ndpPath);
+                        }
+                    }
+                    catch (Exception dlEx)
+                    {
+                        Log($"  ✗ Could not download .NET 4.8 installer: {dlEx.Message}");
+                        SetStatus("Failed: .NET 4.8 download error", 0);
+                        _installBtn.Enabled = true;
+                        return;
                     }
 
                     Log("  Running .NET installer (may require reboot)...");
@@ -331,7 +343,7 @@ namespace PrintSpoolerGuardian.Installer
 
                 if (downloadUrl != null && File.Exists(zipPath))
                 {
-                    try { ZipFile.ExtractToDirectory(zipPath, LocalInstallDir, true); }
+                    try { ZipFile.ExtractToDirectory(zipPath, LocalInstallDir); }
                     catch (Exception ex)
                     {
                         // Try 7z-free extraction using System.IO.Compression

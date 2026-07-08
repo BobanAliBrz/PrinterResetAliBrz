@@ -62,8 +62,8 @@ Only escalates if the previous step didn't fix the problem.
 
 | Requirement | Details |
 |---|---|
-| **OS** | Windows 7 / 8 / 8.1 / 10 / 11 |
-| **.NET** | Self-contained build includes .NET 6.0 runtime (nothing to install) |
+| **OS** | Windows 7 (incl. early pre-SP1, 32-bit & 64-bit) / 8 / 8.1 / 10 / 11 |
+| **.NET** | Requires .NET Framework 4.8 (the setup installer downloads & installs it automatically if missing) |
 | **Permissions** | Administrator (for spooler restart, USB device reset, printer re-add) |
 | **RAM** | ~30 MB |
 | **CPU** | Negligible — just WMI queries every 30s |
@@ -99,8 +99,10 @@ A printer icon appears in the system tray. It auto-registers to start for all us
 ### Build from Source
 
 ```powershell
-dotnet publish -c Release -r win-x64 --self-contained -o .\publish
+dotnet publish -c Release -r win-x64 --framework-dependent -o .\publish
 ```
+
+> The app targets **.NET Framework 4.8** (not .NET 6/7/8) because .NET 6+ does NOT run on Windows 7. The Inno Setup installer installs .NET 4.8 automatically if it's missing. Both `win-x64` and `win-x86` are published so 32-bit and 64-bit Win7 are supported.
 
 ### Auto-Start
 
@@ -167,7 +169,7 @@ Auto-rotates when exceeding 5 MB.
 ## Compatibility Notes (Your Environment)
 
 - **HP M404dn / P1000 series**: These use standard HP USB printing. The PnP disable/enable works cleanly.
-- **Windows 7**: Self-contained .NET 6.0 build works on Win7 with no extra runtime install.
+- **Windows 7**: The app targets .NET Framework 4.8 (not .NET 6/7/8 — those do NOT run on Win7). The setup installer installs .NET 4.8 if needed. Works on early pre-SP1 Win7, both 32-bit and 64-bit.
 - **Celeron E3300 + HDD**: Uses ~30 MB RAM, minimal CPU. WMI queries every 30s are lightweight.
 - **Auto-updates**: Checks GitHub every 24h. Just upload a new release and all PCs update themselves.
 

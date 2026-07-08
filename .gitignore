@@ -49,5 +49,11 @@ Thumbs.db
 # Publish output (self-contained deployment)
 publish/
 
+# Installer output (Inno Setup)
+dist/
+
 # Release archives
 *.zip
+
+# Windows null-device phantom entry (git cannot index a file literally named nul)
+nul

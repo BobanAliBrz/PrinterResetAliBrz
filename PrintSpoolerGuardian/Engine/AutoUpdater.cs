@@ -120,10 +120,10 @@ namespace PrintSpoolerGuardian
                             await wc.DownloadFileTaskAsync(new Uri(downloadUrl), zipPath);
                         }
 
-                        // Extract to install directory
+                        // Extract to install directory (overwrite existing files)
                         try
                         {
-                            ZipFile.ExtractToDirectory(zipPath, _installDirectory, true);
+                            ExtractZipOverwrite(zipPath, _installDirectory);
                         }
                         catch
                         {
@@ -202,6 +202,30 @@ namespace PrintSpoolerGuardian
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Extracts a ZIP, overwriting any existing files. The bool-overwrite overload of
+        /// ZipFile.ExtractToDirectory does not exist on .NET Framework 4.8, so we do it manually.
+        /// </summary>
+        private static void ExtractZipOverwrite(string zipPath, string destDir)
+        {
+            using (var archive = ZipFile.OpenRead(zipPath))
+            {
+                foreach (var entry in archive.Entries)
+                {
+                    // Skip directory entries (they have no name but end with '/')
+                    if (string.IsNullOrEmpty(entry.Name) && entry.FullName.EndsWith("/"))
+                    {
+                        Directory.CreateDirectory(Path.Combine(destDir, entry.FullName.TrimEnd('/')));
+                        continue;
+                    }
+
+                    var destPath = Path.Combine(destDir, entry.FullName);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destPath));
+                    entry.ExtractToFile(destPath, true);
+                }
+            }
         }
 
         private string ExtractVersionFromUrl(string url)
