@@ -122,10 +122,12 @@ namespace PrintSpoolerGuardian
         private static void PauseMonitoringClick(object sender, EventArgs e)
         {
             _pauseUntil = DateTime.Now.AddMinutes(30);
+            _monitorService?.Pause(30);
             _trayIcon.ShowBalloonTip(2000, "Print Spooler Guardian",
                 "Monitoring paused for 30 minutes.", ToolTipIcon.Warning);
 
-            var menuItem = _trayMenu.Items["Pause Monitoring (30min)"];
+            // ToolStripItemCollection uses integer index (0=Status, 1=Recovery, 2=Pause, 3=Exit)
+            var menuItem = _trayMenu.Items[2];
             menuItem.Enabled = false;
 
             Task.Delay(TimeSpan.FromMinutes(30)).ContinueWith(_ =>

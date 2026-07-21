@@ -32,8 +32,8 @@ That's it. It starts monitoring immediately. A printer icon appears in the syste
 
 ## Requirements
 
-- **OS**: Windows 7 / 8 / 8.1 / 10 / 11
-- **.NET**: Framework 4.8 (or .NET 6.0 runtime for the self-contained build)
+- **OS**: Windows 7 SP1 / 8 / 8.1 / 10 / 11 (32-bit & 64-bit)
+- **Dependencies**: **NONE** (Self-contained .NET 8 runtime bundled — zero pre-requisites required)
 - **RAM**: ~30 MB | **CPU**: Negligible
 
 ---
@@ -53,7 +53,7 @@ That's it. It starts monitoring immediately. A printer icon appears in the syste
 
 ## Auto-Updates
 
-Once running, it checks **BobanAliBrz/PrinterResetAliBrz** releases every 24 hours. Upload a new ZIP as a GitHub Release and all deployed PCs will auto-update within a day.
+Once running, it checks **BobanAliBrz/PrinterResetAliBrz** releases every 24 hours. Upload a new release ZIP as a GitHub Release and all deployed PCs will auto-update within a day.
 
 ---
 
@@ -71,7 +71,7 @@ Once running, it checks **BobanAliBrz/PrinterResetAliBrz** releases every 24 hou
 ## Project Structure
 
 ```
-├── PrintSpoolerGuardian/         # Main app (.NET 6.0-windows)
+├── PrintSpoolerGuardian/         # Main app (.NET 8.0-windows, self-contained)
 │   ├── app.config                # Zero-config defaults
 │   ├── Program.cs                # Entry point + tray icon
 │   ├── Engine/
@@ -83,10 +83,10 @@ Once running, it checks **BobanAliBrz/PrinterResetAliBrz** releases every 24 hou
 │   │   ├── SpoolerController.cs   # Spooler control
 │   │   ├── UsbPrinterResetter.cs  # USB PnP disable/enable
 │   │   └── StaleFileCleaner.cs    # Spool file cleanup
-│   └── Helpers/
-│       ├── Logger.cs              # File logger
-│       └── IconHelper.cs          # Tray icon
-├── Bootstrapper/                  # GUI installer (.exe)
+│   ├── Helpers/
+│   │   ├── Logger.cs              # File logger
+│   │   └── IconHelper.cs          # Tray icon
+│   └── Installer/                 # Inno Setup installer script & build tool
 ├── Deploy/                        # Mass deployment script
 └── README.md
 ```

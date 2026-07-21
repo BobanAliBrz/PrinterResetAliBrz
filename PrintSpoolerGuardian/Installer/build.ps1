@@ -3,9 +3,9 @@
     Builds Print Spooler Guardian for win-x64 and win-x86, and compiles the installer.
 .DESCRIPTION
     1. Reads the version from PrintSpoolerGuardian.csproj
-    2. Publishes self-contained for win-x64
-    3. Publishes self-contained for win-x86
-    4. Compiles Inno Setup installer (.exe)
+    2. Publishes self-contained for win-x64 (trimmed)
+    3. Publishes self-contained for win-x86 (trimmed)
+    4. Compiles Inno Setup installer (.exe) containing both architectures
 .PARAMETER Configuration
     Build configuration: Release (default) or Debug
 .PARAMETER SkipBuild
@@ -49,7 +49,7 @@ function Get-ProjectVersion {
 }
 
 function Publish-App($rid) {
-    Log "Publishing $rid ($Configuration, framework-dependent net48)..."
+    Log "Publishing $rid ($Configuration, self-contained + trimmed)..."
     $outDir = "${PublishDir}/${rid}"
 
     if (Test-Path $outDir) {
@@ -57,17 +57,20 @@ function Publish-App($rid) {
         Log "  Cleaned previous publish: $outDir"
     }
 
-    # The app now targets net48 (full .NET Framework 4.8), which is installed on the
-    # target PC by the Inno Setup installer (RequiresNetFramework=4.8). We therefore
-    # publish framework-DEPENDENT (no --self-contained) so the output is small and
-    # runs on the already-present .NET 4.8 runtime. This also makes it run on any
-    # Win7 build (32-bit and 64-bit) that has .NET 4.8 installed.
+    # Self-contained + trimmed (partial) publish.
+    # This bundles the entire .NET runtime into the output so target PCs
+    # need ZERO prerequisites — no .NET Framework, no .NET Runtime, nothing.
+    # TrimMode=partial only trims assemblies that opted in, avoiding breakage
+    # with WMI (System.Management) and WinForms which use heavy reflection.
     $p = Start-Process -FilePath "dotnet" -ArgumentList @(
         "publish",
         "${ProjectRoot}/PrintSpoolerGuardian.csproj",
         "-c", $Configuration,
         "-r", $rid,
+        "--self-contained", "true",
         "-o", $outDir,
+        "-p:PublishTrimmed=true",
+        "-p:TrimMode=partial",
         "-p:DebugType=none",
         "-p:DebugSymbols=false"
     ) -NoNewWindow -Wait -PassThru
@@ -81,9 +84,9 @@ function Publish-App($rid) {
         throw "Build succeeded but $exePath not found!"
     }
 
-    $size = (Get-Item $exePath).Length / 1MB
-    $count = (Get-ChildItem $outDir | Measure-Object).Count
-    Log "  OK - $rid build: ${count} files, exe is $([math]::Round($size, 1)) MB"
+    $totalSize = (Get-ChildItem $outDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
+    $count = (Get-ChildItem $outDir -File -Recurse | Measure-Object).Count
+    Log "  OK - $rid build: ${count} files, total $([math]::Round($totalSize, 1)) MB"
     return $outDir
 }
 
@@ -133,6 +136,7 @@ function Compile-Installer($version) {
 # ========== MAIN ==========
 Write-Host ""
 Write-Host "Print Spooler Guardian - Build Script" -ForegroundColor Cyan
+Write-Host "  Self-contained .NET 8 (no prerequisites on target)" -ForegroundColor DarkCyan
 Write-Host ""
 
 $version = Get-ProjectVersion

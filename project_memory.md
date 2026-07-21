@@ -292,24 +292,21 @@ var match = Regex.Match(json,
 
 **Solution:** Used `lock` statement on a static object for thread safety, and check file size on every write — rotate at 5MB by renaming to timestamped backup.
 
-### 8.5 Framework-Dependent net48 Publish (NOT self-contained)
+### 8.5 Migration to .NET 8 Self-Contained (v2.0 Overhaul)
 
-**Problem:** Target PCs run Windows 7, which does NOT support .NET 6/7/8. .NET 6+ refuses to run on Win7 (the original `net6.0-windows` self-contained build failed on a friend's Win7 machine with an error). The fix is to target `net48` (full .NET Framework 4.8), which DOES run on Win7.
+**Problem:** Framework-dependent net48 publishing required downloading .NET Framework 4.8 via web installer during setup on bare Windows 7 PCs. This download took 10-20+ minutes over slow connections / HDDs, causing severe deployment bottlenecks.
 
-**Solution:** The main app targets `net48` and is published **framework-dependent** (no `--self-contained`). The Inno Setup installer (`setup.iss`) checks for .NET 4.8 in `InitializeSetup` and, if missing, downloads/installs it via `certutil` + the MS web installer before proceeding. Output is tiny (~0.1 MB exe + config). Both `win-x64` and `win-x86` are published and shipped so 32-bit and 64-bit Win7 both work.
+**Solution:** Migrated the app to target `net8.0-windows` published **self-contained** with `TrimMode=partial`. The complete .NET 8 runtime is bundled directly into the installation files. Target machines now require **ZERO pre-requisites or downloads** — installation finishes in seconds. Both `win-x64` and `win-x86` architectures are compiled and packed into a unified Inno Setup installer that auto-detects system architecture.
 
-**CRITICAL Win7 lessons:**
-- .NET 6/7/8 do NOT run on Windows 7 — must use `net48` (or netcoreapp3.1, but 3.1 is EOL). This was the root cause of the original setup failure.
-- `MinVersion=6.1sp1` in Inno blocked early (pre-SP1) Win7 builds — lowered to `6.1`.
-- `ZipFile.ExtractToDirectory(path, dir, overwrite: bool)` overload does NOT exist in net48 — use manual extraction.
-- `dynamic` (COM interop) requires a `Microsoft.CSharp` reference on net48.
-- `System.Management` / `System.ServiceProcess` are framework assemblies on net48 (use `<Reference>`, not NuGet packages).
+**Key v2.0 Architecture Details:**
+- **Zero Dependencies:** Bundles .NET 8 runtime files directly.
+- **Trimming:** Uses `<TrimMode>partial</TrimMode>` with `<_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>` and root assembly rules for `System.Management` and `System.Configuration.ConfigurationManager` to safely optimize binary size without breaking WMI or WinForms reflection.
+- **OS Support:** Windows 7 SP1 / 8 / 8.1 / 10 / 11 (32-bit & 64-bit).
+- **Auto-Updater:** Updated to use static `HttpClient` and `AppContext.BaseDirectory`. Auto-detects `RuntimeInformation.ProcessArchitecture` to fetch the correct architecture release ZIP from GitHub.
 
-### 8.6 Both Main App and Bootstrapper Target net48
+### 8.6 Removal of Bootstrapper Project
 
-**Problem:** The app must run on bare Windows 7 (including early pre-SP1 32-bit and 64-bit builds). .NET 6+ cannot run there.
-
-**Solution:** Both the main app (`PrintSpoolerGuardian.csproj`) and the bootstrapper (`Bootstrapper.csproj`) target `net48`. The Inno Setup installer (`setup.iss`) checks for .NET 4.8 in `InitializeSetup` and offers to download/install it automatically (via `certutil.exe -urlcache`). The app is then framework-dependent — no bundled runtime, no chicken-and-egg because the installer handles .NET 4.8 first.
+The legacy `Bootstrapper` project (WinForms GUI installer) was removed as it was redundant with the Inno Setup installer (`Installer/setup.iss`) which handles architecture detection, silent deployment, and auto-start shortcut creation directly.
 
 ### 8.7 WMI Event Subscription Limitations
 

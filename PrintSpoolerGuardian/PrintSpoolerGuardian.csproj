@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net48</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>PrintSpoolerGuardian</AssemblyName>
@@ -9,35 +9,40 @@
     <LangVersion>latest</LangVersion>
 
     <!-- Version info -->
-    <Version>1.2.1.0</Version>
-    <AssemblyVersion>1.2.1.0</AssemblyVersion>
-    <FileVersion>1.2.1.0</FileVersion>
+    <Version>2.0.0.0</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
     <Product>Print Spooler Guardian</Product>
     <Description>Zero-config USB &amp; shared printer monitoring and auto-recovery for Windows</Description>
     <Copyright>Copyright © BobanAliBrz 2025-2026</Copyright>
     <Company>BobanAliBrz</Company>
+
+    <!-- Self-contained: bundles the entire .NET runtime so target PCs need ZERO prerequisites.
+         No .NET Framework download, no waiting — just install and run. -->
+    <SelfContained>true</SelfContained>
+    <PublishTrimmed>true</PublishTrimmed>
+    <!-- Partial trimming is safer — only trims assemblies that opted in.
+         Full trimming can break WMI (System.Management) and WinForms reflection. -->
+    <TrimMode>partial</TrimMode>
+    <!-- WinForms is safe with partial trim — suppress the blanket SDK error -->
+    <_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- These are framework assemblies shipped with .NET Framework 4.8 (no NuGet package needed).
-         Using the framework assemblies (instead of NuGet) avoids runtime-loading issues on bare Win7. -->
-    <Reference Include="System.Management" />
-    <Reference Include="System.ServiceProcess" />
-    <Reference Include="System.IO.Compression" />
-    <Reference Include="System.IO.Compression.FileSystem" />
-    <Reference Include="System.Configuration" />
-    <Reference Include="System.Xml" />
-    <!-- Required for `dynamic` (COM interop in Program.cs) on net48 -->
-    <Reference Include="Microsoft.CSharp" />
+    <!-- NuGet packages (these replace the old net48 framework references) -->
+    <PackageReference Include="System.Management" Version="8.0.0" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
+    <PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.1" />
   </ItemGroup>
 
-  <!-- Allows building net48 on dev machines that don't have the framework reference
-       assemblies installed locally (SDK restores them automatically). -->
+  <!-- Prevent the trimmer from removing assemblies that use reflection heavily -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" />
+    <TrimmerRootAssembly Include="System.Management" />
+    <TrimmerRootAssembly Include="System.Configuration.ConfigurationManager" />
   </ItemGroup>
 
-  <!-- Bootstrapper is a separate project - exclude from main build -->
+  <!-- Bootstrapper is dead — excluded from build -->
   <ItemGroup>
     <Compile Remove="Bootstrapper\**" />
     <EmbeddedResource Remove="Bootstrapper\**" />

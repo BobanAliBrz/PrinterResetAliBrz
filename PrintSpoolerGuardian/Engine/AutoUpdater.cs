@@ -4,8 +4,9 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
-using System.Net;
+using System.Net.Http;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,6 +16,7 @@ namespace PrintSpoolerGuardian
     /// <summary>
     /// Checks GitHub releases periodically and auto-updates the application.
     /// Designed to run alongside the monitor service with minimal overhead.
+    /// Downloads the platform-specific ZIP (win-x64 or win-x86) automatically.
     /// </summary>
     public class AutoUpdater
     {
@@ -22,18 +24,35 @@ namespace PrintSpoolerGuardian
         private readonly int _checkIntervalHours;
         private readonly string _installDirectory;
         private readonly string _currentVersion;
+        private readonly string _platformRid;
 
+        private static readonly HttpClient _httpClient;
         private Timer _checkTimer;
         private DateTime _lastCheck = DateTime.MinValue;
+
+        static AutoUpdater()
+        {
+            var handler = new HttpClientHandler();
+            _httpClient = new HttpClient(handler);
+            _httpClient.DefaultRequestHeaders.Add("User-Agent", "PrintSpoolerGuardian-AutoUpdater");
+            _httpClient.Timeout = TimeSpan.FromMinutes(10);
+        }
 
         public AutoUpdater()
         {
             _updateRepo = ConfigurationManager.AppSettings["UpdateGitHubRepo"] ?? "";
             _checkIntervalHours = int.TryParse(
                 ConfigurationManager.AppSettings["UpdateCheckIntervalHours"] ?? "24", out var h) ? h : 24;
-            _installDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
-                ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory);
+
+            // Use AppContext.BaseDirectory — works for self-contained and single-file publish
+            // (Assembly.GetExecutingAssembly().Location returns empty for single-file)
+            _installDirectory = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
             _currentVersion = GetCurrentVersion();
+
+            // Detect current platform for downloading the correct architecture ZIP
+            _platformRid = RuntimeInformation.ProcessArchitecture == Architecture.X86
+                ? "win-x86"
+                : "win-x64";
         }
 
         /// <summary>
@@ -60,7 +79,8 @@ namespace PrintSpoolerGuardian
                 TimeSpan.FromMinutes(5),
                 TimeSpan.FromHours(_checkIntervalHours));
 
-            Logger.Info($"Auto-update enabled. Repository: {_updateRepo}, Check interval: {_checkIntervalHours}h");
+            Logger.Info($"Auto-update enabled. Repository: {_updateRepo}, " +
+                $"Check interval: {_checkIntervalHours}h, Platform: {_platformRid}");
         }
 
         public void Stop()
@@ -87,7 +107,8 @@ namespace PrintSpoolerGuardian
             {
                 Logger.Info("Checking for updates...");
 
-                var downloadUrl = await GetLatestReleaseUrlAsync();
+                var (downloadUrl, latestVersion) = await GetLatestReleaseInfoAsync();
+
                 if (string.IsNullOrEmpty(downloadUrl))
                 {
                     LastCheckResult = "Could not retrieve latest release info";
@@ -95,10 +116,9 @@ namespace PrintSpoolerGuardian
                     return;
                 }
 
-                var latestVersion = ExtractVersionFromUrl(downloadUrl);
                 if (string.IsNullOrEmpty(latestVersion))
                 {
-                    LastCheckResult = "Could not determine version from release URL";
+                    LastCheckResult = "Could not determine version from release";
                     Logger.Warn(LastCheckResult);
                     return;
                 }
@@ -114,48 +134,21 @@ namespace PrintSpoolerGuardian
                     var zipPath = Path.Combine(Path.GetTempPath(), $"psg_update_{latestVersion}.zip");
                     try
                     {
-                        using (var wc = new WebClient())
+                        using (var response = await _httpClient.GetAsync(downloadUrl))
                         {
-                            wc.Headers.Add("User-Agent", "PrintSpoolerGuardian-AutoUpdater");
-                            await wc.DownloadFileTaskAsync(new Uri(downloadUrl), zipPath);
-                        }
-
-                        // Extract to install directory (overwrite existing files)
-                        try
-                        {
-                            ExtractZipOverwrite(zipPath, _installDirectory);
-                        }
-                        catch
-                        {
-                            // Fallback: manual entry-by-entry extraction
-                            using (var archive = ZipFile.OpenRead(zipPath))
+                            response.EnsureSuccessStatusCode();
+                            using (var fs = new FileStream(zipPath, FileMode.Create))
                             {
-                                foreach (var entry in archive.Entries)
-                                {
-                                    try
-                                    {
-                                        // Only extract core files
-                                        if (!entry.FullName.EndsWith(".exe") &&
-                                            !entry.FullName.EndsWith(".config") &&
-                                            !entry.FullName.EndsWith(".dll") &&
-                                            !entry.FullName.EndsWith(".manifest") &&
-                                            !entry.FullName.EndsWith(".pdb"))
-                                            continue;
-
-                                        var destPath = Path.Combine(_installDirectory,
-                                            Path.GetFileName(entry.FullName));
-                                        if (!entry.FullName.EndsWith("/"))
-                                            entry.ExtractToFile(destPath, true);
-                                    }
-                                    catch { /* Skip problematic files */ }
-                                }
+                                await response.Content.CopyToAsync(fs);
                             }
                         }
 
+                        // Extract to install directory (overwrite existing files)
+                        ExtractZipOverwrite(zipPath, _installDirectory);
                         File.Delete(zipPath);
 
-                        // Restart the service to pick up new binary
-                        Logger.Info("Update downloaded. Restarting Print Spooler Guardian service...");
+                        // Restart the app to pick up new binary
+                        Logger.Info("Update downloaded and extracted. Restarting...");
                         _checkTimer?.Dispose();
                         RestartSelf();
                     }
@@ -163,7 +156,7 @@ namespace PrintSpoolerGuardian
                     {
                         Logger.Error($"Auto-update failed: {ex.Message}");
                         LastCheckResult = $"Update failed: {ex.Message}";
-                        File.Delete(zipPath);
+                        try { File.Delete(zipPath); } catch { }
                     }
                 }
                 else
@@ -179,34 +172,62 @@ namespace PrintSpoolerGuardian
             }
         }
 
-        private async Task<string> GetLatestReleaseUrlAsync()
+        /// <summary>
+        /// Queries the GitHub Releases API and returns the best download URL + version.
+        /// Prefers the platform-specific ZIP (e.g. win-x64) but falls back to any ZIP.
+        /// </summary>
+        private async Task<(string url, string version)> GetLatestReleaseInfoAsync()
         {
             try
             {
-                using (var wc = new WebClient())
-                {
-                    wc.Headers.Add("User-Agent", "PrintSpoolerGuardian-AutoUpdater");
-                    var apiUrl = $"https://api.github.com/repos/{_updateRepo}/releases/latest";
-                    var json = await wc.DownloadStringTaskAsync(apiUrl);
+                var apiUrl = $"https://api.github.com/repos/{_updateRepo}/releases/latest";
+                var json = await _httpClient.GetStringAsync(apiUrl);
 
-                    // Simple regex-based JSON parsing (no Newtonsoft dependency)
-                    var match = Regex.Match(json,
-                        @"""browser_download_url""\s*:\s*""([^""]*(?:\.zip|\.msi))""");
-                    if (match.Success)
-                        return match.Groups[1].Value;
+                // Extract version from "tag_name": "v2.0.0" or "tag_name": "2.0.0"
+                var versionMatch = Regex.Match(json, @"""tag_name""\s*:\s*""v?(\d+\.\d+(?:\.\d+(?:\.\d+)?)?)""");
+                var version = versionMatch.Success ? versionMatch.Groups[1].Value : null;
+
+                // Find all ZIP download URLs
+                var urlMatches = Regex.Matches(json, @"""browser_download_url""\s*:\s*""([^""]*\.zip)""");
+
+                if (urlMatches.Count == 0)
+                    return (null, version);
+
+                // Prefer platform-specific ZIP (e.g. containing "win-x64" or "win-x86")
+                string bestUrl = null;
+                string fallbackUrl = null;
+
+                foreach (Match m in urlMatches)
+                {
+                    var url = m.Groups[1].Value;
+                    if (url.IndexOf(_platformRid, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        bestUrl = url;
+                        break;
+                    }
+                    if (fallbackUrl == null)
+                        fallbackUrl = url;
                 }
+
+                var downloadUrl = bestUrl ?? fallbackUrl;
+
+                // If no version from tag_name, try to extract from URL
+                if (string.IsNullOrEmpty(version) && downloadUrl != null)
+                    version = ExtractVersionFromUrl(downloadUrl);
+
+                return (downloadUrl, version);
             }
             catch (Exception ex)
             {
                 Logger.Debug($"GitHub API query failed: {ex.Message}");
+                return (null, null);
             }
-
-            return null;
         }
 
         /// <summary>
         /// Extracts a ZIP, overwriting any existing files. The bool-overwrite overload of
-        /// ZipFile.ExtractToDirectory does not exist on .NET Framework 4.8, so we do it manually.
+        /// ZipFile.ExtractToDirectory is available in .NET 8, but we use manual extraction
+        /// for more control (skip files that are locked, etc.).
         /// </summary>
         private static void ExtractZipOverwrite(string zipPath, string destDir)
         {
@@ -221,9 +242,17 @@ namespace PrintSpoolerGuardian
                         continue;
                     }
 
-                    var destPath = Path.Combine(destDir, entry.FullName);
-                    Directory.CreateDirectory(Path.GetDirectoryName(destPath));
-                    entry.ExtractToFile(destPath, true);
+                    try
+                    {
+                        var destPath = Path.Combine(destDir, entry.FullName);
+                        Directory.CreateDirectory(Path.GetDirectoryName(destPath));
+                        entry.ExtractToFile(destPath, true);
+                    }
+                    catch (Exception ex)
+                    {
+                        // File may be locked (e.g. the running exe) — skip it
+                        Logger.Debug($"Could not overwrite {entry.FullName}: {ex.Message}");
+                    }
                 }
             }
         }
@@ -239,16 +268,17 @@ namespace PrintSpoolerGuardian
         {
             try
             {
-                var exePath = Path.Combine(_installDirectory, "PrintSpoolerGuardian.exe");
-                if (File.Exists(exePath))
+                var exePath = Process.GetCurrentProcess().MainModule?.FileName;
+                if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
                     return FileVersionInfo.GetVersionInfo(exePath).ProductVersion ?? "0.0.0";
             }
             catch { /* ignore */ }
 
             try
             {
-                return FileVersionInfo.GetVersionInfo(Assembly.GetExecutingAssembly().Location)
-                    .ProductVersion ?? "0.0.0";
+                var exePath = Path.Combine(_installDirectory, "PrintSpoolerGuardian.exe");
+                if (File.Exists(exePath))
+                    return FileVersionInfo.GetVersionInfo(exePath).ProductVersion ?? "0.0.0";
             }
             catch { /* ignore */ }
 
@@ -281,7 +311,9 @@ namespace PrintSpoolerGuardian
             try
             {
                 // Start a new instance (picks up the updated binary)
-                var exePath = Assembly.GetExecutingAssembly().Location;
+                var exePath = Process.GetCurrentProcess().MainModule?.FileName
+                    ?? Path.Combine(_installDirectory, "PrintSpoolerGuardian.exe");
+
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = exePath,
