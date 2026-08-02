@@ -22,11 +22,4 @@
       <supportedOS Id="{9940431d-4c69-4a71-860d-28a5c3c71fe3}" />
     </application>
   </compatibility>
-  <dependency>
-    <dependentAssembly>
-      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0"
-                        processorArchitecture="*" publicKeyToken="6595b64144ccf1df8"
-                        language="*" />
-    </dependentAssembly>
-  </dependency>
 </assembly>
