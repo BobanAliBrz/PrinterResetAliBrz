@@ -9,7 +9,7 @@
 
 ; Version is passed via /dMyAppVersion= from build.ps1, or default here
 #ifndef MyAppVersion
-  #define MyAppVersion "2.0.1.0"
+  #define MyAppVersion "2.0.2.0"
 #endif
 
 [Setup]
@@ -41,7 +41,8 @@ ArchitecturesAllowed=x64 x86
 DisableProgramGroupPage=yes
 CloseApplications=yes
 ; Support Windows 7 SP1 and later (6.1sp1 = Win7 SP1).
-; The app is now self-contained (.NET 8 bundled), so NO .NET prerequisite is needed.
+; The app is self-contained and includes the app-local Universal CRT required by
+; Windows 7 systems that do not have KB2999226 / the VC++ runtime installed.
 MinVersion=6.1sp1
 
 [Languages]

@@ -90,6 +90,45 @@ function Publish-App($rid) {
     return $outDir
 }
 
+function Add-UniversalCrt([string]$Rid, [string]$Destination) {
+    # Self-contained .NET still uses the Windows Universal CRT. Windows 10+
+    # provides it, but untouched Windows 7 installations commonly do not.
+    # App-local deployment avoids installing a machine-wide VC++ runtime.
+    $architecture = switch ($Rid) {
+        "win-x86" { "x86" }
+        "win-x64" { "x64" }
+        default { throw "No Universal CRT architecture mapping for runtime identifier: $Rid" }
+    }
+
+    $candidateRoots = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:WindowsSdkDir)) {
+        $candidateRoots += Join-Path $env:WindowsSdkDir "Redist\ucrt\DLLs"
+    }
+    if (-not [string]::IsNullOrWhiteSpace(${env:ProgramFiles(x86)})) {
+        $candidateRoots += "${env:ProgramFiles(x86)}\Windows Kits\10\Redist\ucrt\DLLs"
+    }
+
+    $source = $candidateRoots |
+        ForEach-Object { Join-Path $_ $architecture } |
+        Where-Object {
+            (Test-Path (Join-Path $_ "ucrtbase.dll")) -and
+            (Test-Path (Join-Path $_ "api-ms-win-crt-runtime-l1-1-0.dll"))
+        } |
+        Select-Object -First 1
+
+    if ([string]::IsNullOrWhiteSpace($source)) {
+        throw "Universal CRT redistributable files for $architecture were not found. Install the Windows 10 SDK, then rebuild."
+    }
+
+    $files = Get-ChildItem -Path $source -Filter "*.dll" -File
+    if ($files.Count -eq 0) {
+        throw "No Universal CRT DLLs were found in $source"
+    }
+
+    Copy-Item -Path (Join-Path $source "*.dll") -Destination $Destination -Force
+    Log "  Included $($files.Count) app-local Universal CRT DLLs for $architecture"
+}
+
 function Compile-Installer($version) {
     if (!(Test-Path $InstallerExe)) {
         throw "Inno Setup ISCC.exe not found at $InstallerExe"
@@ -158,6 +197,10 @@ if (-not $SkipBuild) {
     if ($buildDirs.Count -eq 0) {
         throw "No existing builds found in ${PublishDir}"
     }
+}
+
+foreach ($buildDir in $buildDirs) {
+    Add-UniversalCrt -Rid (Split-Path $buildDir -Leaf) -Destination $buildDir
 }
 
 if (-not $SkipInstaller) {

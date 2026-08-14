@@ -4,6 +4,12 @@ All notable changes to Print Spooler Guardian are recorded here.
 
 ## [Unreleased]
 
+## [2.0.2.0] - 2026-08-14
+
+### Fixed
+
+- Bundle the full architecture-matched Universal CRT beside the application so it launches on Windows 7 machines without the VC++ runtime or KB2999226 installed.
+
 ### Documentation
 
 - Added this change log and a concise maintainer reference.

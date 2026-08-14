@@ -1,8 +1,8 @@
 # Print Spooler Guardian — Maintainer Memory
 
 > **Repository:** `BobanAliBrz/PrinterResetAliBrz`
-> **Current version:** `2.0.1.0`
-> **Last reviewed:** 2026-08-12
+> **Current version:** `2.0.2.0`
+> **Last reviewed:** 2026-08-14
 
 ## Purpose
 
@@ -13,7 +13,7 @@ The application monitors print jobs and printer error states using WMI events pl
 ## Current Architecture
 
 - **App:** `PrintSpoolerGuardian/`, a WinForms tray app targeting `net8.0-windows`.
-- **Deployment:** self-contained, partially trimmed builds for `win-x64` and `win-x86`; no .NET runtime installation is required on target machines.
+- **Deployment:** self-contained, partially trimmed builds for `win-x64` and `win-x86`. The installer also carries an app-local Universal CRT, so it does not require the VC++ runtime or KB2999226 on Windows 7.
 - **Installer:** `PrintSpoolerGuardian/Installer/setup.iss` packages both architectures into one administrator-required Inno Setup executable.
 - **Startup:** the installer creates an All Users Startup shortcut. The app is not a Windows service.
 - **Updates:** `Engine/AutoUpdater.cs` checks GitHub Releases for a newer version and restarts the application after applying an update.
@@ -62,7 +62,7 @@ Build the installer from the app directory:
 
 The output is `dist/PrintSpoolerGuardian_Setup_v<version>.exe`. For a release, create and push a matching Git tag and attach that installer to the GitHub Release. Use the release notes to state the user-visible changes and any compatibility impact.
 
-The current approved artifact is `dist/PrintSpoolerGuardian_Setup_v2.0.1.0.exe` (built 2026-08-02).
+The next release artifact is `dist/PrintSpoolerGuardian_Setup_v2.0.2.0.exe`.
 
 ## Compatibility and Constraints
 
