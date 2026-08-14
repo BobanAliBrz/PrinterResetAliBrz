@@ -4,7 +4,18 @@ All notable changes to Print Spooler Guardian are recorded here.
 
 ## [Unreleased]
 
-## [2.0.2.0] - 2026-08-14
+## [2.1.0.0] - 2026-08-14
+
+### Changed
+
+- Switched the application runtime from unsupported .NET 8 to .NET Framework 4.8 for Windows 7 SP1 through Windows 11 compatibility.
+- Bundle the official Microsoft .NET Framework 4.8 offline installer and install it only when the target PC does not already have it.
+
+### Fixed
+
+- Avoid the Windows 7 `hostfxr.dll` startup failure that prevented .NET 8 builds from launching.
+
+## [2.0.2.0] - 2026-08-14 (unreleased)
 
 ### Fixed
 

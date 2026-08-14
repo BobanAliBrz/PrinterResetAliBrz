@@ -1,48 +1,44 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net48</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>PrintSpoolerGuardian</AssemblyName>
     <RootNamespace>PrintSpoolerGuardian</RootNamespace>
     <LangVersion>latest</LangVersion>
+    <!-- Do not treat generated publish DLLs as source items or build references. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);publish\**</DefaultItemExcludes>
 
     <!-- Version info -->
-    <Version>2.0.2.0</Version>
-    <AssemblyVersion>2.0.2.0</AssemblyVersion>
-    <FileVersion>2.0.2.0</FileVersion>
+    <Version>2.1.0.0</Version>
+    <AssemblyVersion>2.1.0.0</AssemblyVersion>
+    <FileVersion>2.1.0.0</FileVersion>
     <Product>Print Spooler Guardian</Product>
     <Description>Zero-config USB &amp; shared printer monitoring and auto-recovery for Windows</Description>
     <Copyright>Copyright © BobanAliBrz 2025-2026</Copyright>
     <Company>BobanAliBrz</Company>
 
-    <!-- Self-contained: bundles the entire .NET runtime so target PCs need ZERO prerequisites.
-         No .NET Framework download, no waiting — just install and run. -->
-    <SelfContained>true</SelfContained>
-    <PublishTrimmed>true</PublishTrimmed>
-    <!-- Partial trimming is safer — only trims assemblies that opted in.
-         Full trimming can break WMI (System.Management) and WinForms reflection. -->
-    <TrimMode>partial</TrimMode>
-    <!-- WinForms is safe with partial trim — suppress the blanket SDK error -->
-    <_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
-    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- NuGet packages (these replace the old net48 framework references) -->
-    <PackageReference Include="System.Management" Version="8.0.0" />
-    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
-    <PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.1" />
+    <!-- Framework assemblies: using these avoids runtime-loading issues on Win7. -->
+    <Reference Include="System.Management" />
+    <Reference Include="System.ServiceProcess" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Configuration" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Xml" />
+    <Reference Include="Microsoft.CSharp" />
   </ItemGroup>
 
-  <!-- Prevent the trimmer from removing assemblies that use reflection heavily -->
+  <!-- Enables net48 builds on machines without local .NET Framework reference assemblies. -->
   <ItemGroup>
-    <TrimmerRootAssembly Include="System.Management" />
-    <TrimmerRootAssembly Include="System.Configuration.ConfigurationManager" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
   </ItemGroup>
 
-  <!-- Bootstrapper is dead — excluded from build -->
+  <!-- Bootstrapper is excluded from the main build. -->
   <ItemGroup>
     <Compile Remove="Bootstrapper\**" />
     <EmbeddedResource Remove="Bootstrapper\**" />

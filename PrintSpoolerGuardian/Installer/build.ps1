@@ -3,9 +3,10 @@
     Builds Print Spooler Guardian for win-x64 and win-x86, and compiles the installer.
 .DESCRIPTION
     1. Reads the version from PrintSpoolerGuardian.csproj
-    2. Publishes self-contained for win-x64 (trimmed)
-    3. Publishes self-contained for win-x86 (trimmed)
-    4. Compiles Inno Setup installer (.exe) containing both architectures
+    2. Publishes framework-dependent net48 for win-x64
+    3. Publishes framework-dependent net48 for win-x86
+    4. Downloads the official .NET Framework 4.8 offline installer when needed
+    5. Compiles the unified Inno Setup installer
 .PARAMETER Configuration
     Build configuration: Release (default) or Debug
 .PARAMETER SkipBuild
@@ -49,7 +50,7 @@ function Get-ProjectVersion {
 }
 
 function Publish-App($rid) {
-    Log "Publishing $rid ($Configuration, self-contained + trimmed)..."
+    Log "Publishing $rid ($Configuration, framework-dependent net48)..."
     $outDir = "${PublishDir}/${rid}"
 
     if (Test-Path $outDir) {
@@ -57,20 +58,15 @@ function Publish-App($rid) {
         Log "  Cleaned previous publish: $outDir"
     }
 
-    # Self-contained + trimmed (partial) publish.
-    # This bundles the entire .NET runtime into the output so target PCs
-    # need ZERO prerequisites — no .NET Framework, no .NET Runtime, nothing.
-    # TrimMode=partial only trims assemblies that opted in, avoiding breakage
-    # with WMI (System.Management) and WinForms which use heavy reflection.
+    # Win7 uses the .NET Framework 4.8 runtime installed by the bundled
+    # prerequisite. Do not use the modern self-contained runtime here: its
+    # host is not compatible with Windows 7.
     $p = Start-Process -FilePath "dotnet" -ArgumentList @(
         "publish",
         "${ProjectRoot}/PrintSpoolerGuardian.csproj",
         "-c", $Configuration,
         "-r", $rid,
-        "--self-contained", "true",
         "-o", $outDir,
-        "-p:PublishTrimmed=true",
-        "-p:TrimMode=partial",
         "-p:DebugType=none",
         "-p:DebugSymbols=false"
     ) -NoNewWindow -Wait -PassThru
@@ -90,43 +86,26 @@ function Publish-App($rid) {
     return $outDir
 }
 
-function Add-UniversalCrt([string]$Rid, [string]$Destination) {
-    # Self-contained .NET still uses the Windows Universal CRT. Windows 10+
-    # provides it, but untouched Windows 7 installations commonly do not.
-    # App-local deployment avoids installing a machine-wide VC++ runtime.
-    $architecture = switch ($Rid) {
-        "win-x86" { "x86" }
-        "win-x64" { "x64" }
-        default { throw "No Universal CRT architecture mapping for runtime identifier: $Rid" }
+function Ensure-Net48OfflineInstaller {
+    $prerequisiteDirectory = Join-Path $PSScriptRoot "Prerequisites"
+    $installerPath = Join-Path $prerequisiteDirectory "ndp48-x86-x64-allos-enu.exe"
+
+    if (Test-Path $installerPath) {
+        return $installerPath
     }
 
-    $candidateRoots = @()
-    if (-not [string]::IsNullOrWhiteSpace($env:WindowsSdkDir)) {
-        $candidateRoots += Join-Path $env:WindowsSdkDir "Redist\ucrt\DLLs"
-    }
-    if (-not [string]::IsNullOrWhiteSpace(${env:ProgramFiles(x86)})) {
-        $candidateRoots += "${env:ProgramFiles(x86)}\Windows Kits\10\Redist\ucrt\DLLs"
-    }
+    New-Item -ItemType Directory -Path $prerequisiteDirectory -Force | Out-Null
+    Log "Downloading the official .NET Framework 4.8 offline installer..."
+    Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2088631" -OutFile $installerPath
 
-    $source = $candidateRoots |
-        ForEach-Object { Join-Path $_ $architecture } |
-        Where-Object {
-            (Test-Path (Join-Path $_ "ucrtbase.dll")) -and
-            (Test-Path (Join-Path $_ "api-ms-win-crt-runtime-l1-1-0.dll"))
-        } |
-        Select-Object -First 1
-
-    if ([string]::IsNullOrWhiteSpace($source)) {
-        throw "Universal CRT redistributable files for $architecture were not found. Install the Windows 10 SDK, then rebuild."
+    $signature = Get-AuthenticodeSignature -FilePath $installerPath
+    if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "Microsoft") {
+        Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
+        throw "The downloaded .NET Framework 4.8 installer did not have a valid Microsoft signature."
     }
 
-    $files = Get-ChildItem -Path $source -Filter "*.dll" -File
-    if ($files.Count -eq 0) {
-        throw "No Universal CRT DLLs were found in $source"
-    }
-
-    Copy-Item -Path (Join-Path $source "*.dll") -Destination $Destination -Force
-    Log "  Included $($files.Count) app-local Universal CRT DLLs for $architecture"
+    Log "  Downloaded and verified: $installerPath"
+    return $installerPath
 }
 
 function Compile-Installer($version) {
@@ -175,7 +154,7 @@ function Compile-Installer($version) {
 # ========== MAIN ==========
 Write-Host ""
 Write-Host "Print Spooler Guardian - Build Script" -ForegroundColor Cyan
-Write-Host "  Self-contained .NET 8 (no prerequisites on target)" -ForegroundColor DarkCyan
+Write-Host "  .NET Framework 4.8 compatibility build for Windows 7 through 11" -ForegroundColor DarkCyan
 Write-Host ""
 
 $version = Get-ProjectVersion
@@ -199,11 +178,8 @@ if (-not $SkipBuild) {
     }
 }
 
-foreach ($buildDir in $buildDirs) {
-    Add-UniversalCrt -Rid (Split-Path $buildDir -Leaf) -Destination $buildDir
-}
-
 if (-not $SkipInstaller) {
+    Ensure-Net48OfflineInstaller | Out-Null
     $installer = Compile-Installer $version
     Log ""
     Log "======= BUILD COMPLETE ======="

@@ -33,7 +33,7 @@ That's it. It starts monitoring immediately. A printer icon appears in the syste
 ## Requirements
 
 - **OS**: Windows 7 SP1 / 8 / 8.1 / 10 / 11 (32-bit & 64-bit)
-- **Dependencies**: **NONE** (Self-contained .NET 8 runtime bundled — zero pre-requisites required)
+- **Runtime**: .NET Framework 4.8. The installer includes Microsoft's offline runtime installer and installs it only when required.
 - **RAM**: ~30 MB | **CPU**: Negligible
 
 ---
@@ -71,7 +71,7 @@ Once running, it checks **BobanAliBrz/PrinterResetAliBrz** releases every 24 hou
 ## Project Structure
 
 ```
-├── PrintSpoolerGuardian/         # Main app (.NET 8.0-windows, self-contained)
+├── PrintSpoolerGuardian/         # Main app (.NET Framework 4.8)
 │   ├── app.config                # Zero-config defaults
 │   ├── Program.cs                # Entry point + tray icon
 │   ├── Engine/

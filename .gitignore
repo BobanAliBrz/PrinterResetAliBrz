@@ -51,6 +51,7 @@ publish/
 
 # Installer output (Inno Setup)
 dist/
+PrintSpoolerGuardian/Installer/Prerequisites/
 
 # Release archives
 *.zip
