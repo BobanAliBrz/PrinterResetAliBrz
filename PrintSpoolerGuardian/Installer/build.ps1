@@ -3,10 +3,9 @@
     Builds Print Spooler Guardian for win-x64 and win-x86, and compiles the installer.
 .DESCRIPTION
     1. Reads the version from PrintSpoolerGuardian.csproj
-    2. Publishes framework-dependent net48 for win-x64
-    3. Publishes framework-dependent net48 for win-x86
-    4. Downloads the official .NET Framework 4.8 offline installer when needed
-    5. Compiles the unified Inno Setup installer
+    2. Publishes the .NET Framework 3.5.1-compatible build for win-x64
+    3. Publishes the .NET Framework 3.5.1-compatible build for win-x86
+    4. Compiles the unified Inno Setup installer
 .PARAMETER Configuration
     Build configuration: Release (default) or Debug
 .PARAMETER SkipBuild
@@ -50,7 +49,7 @@ function Get-ProjectVersion {
 }
 
 function Publish-App($rid) {
-    Log "Publishing $rid ($Configuration, framework-dependent net48)..."
+    Log "Publishing $rid ($Configuration, .NET Framework 3.5.1 compatible)..."
     $outDir = "${PublishDir}/${rid}"
 
     if (Test-Path $outDir) {
@@ -58,9 +57,8 @@ function Publish-App($rid) {
         Log "  Cleaned previous publish: $outDir"
     }
 
-    # Win7 uses the .NET Framework 4.8 runtime installed by the bundled
-    # prerequisite. Do not use the modern self-contained runtime here: its
-    # host is not compatible with Windows 7.
+    # Windows 7 SP1 ships .NET Framework 3.5.1. No runtime bootstrapper is
+    # needed, avoiding machine-wide runtime changes and certificate issues.
     $p = Start-Process -FilePath "dotnet" -ArgumentList @(
         "publish",
         "${ProjectRoot}/PrintSpoolerGuardian.csproj",
@@ -84,28 +82,6 @@ function Publish-App($rid) {
     $count = (Get-ChildItem $outDir -File -Recurse | Measure-Object).Count
     Log "  OK - $rid build: ${count} files, total $([math]::Round($totalSize, 1)) MB"
     return $outDir
-}
-
-function Ensure-Net48OfflineInstaller {
-    $prerequisiteDirectory = Join-Path $PSScriptRoot "Prerequisites"
-    $installerPath = Join-Path $prerequisiteDirectory "ndp48-x86-x64-allos-enu.exe"
-
-    if (Test-Path $installerPath) {
-        return $installerPath
-    }
-
-    New-Item -ItemType Directory -Path $prerequisiteDirectory -Force | Out-Null
-    Log "Downloading the official .NET Framework 4.8 offline installer..."
-    Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2088631" -OutFile $installerPath
-
-    $signature = Get-AuthenticodeSignature -FilePath $installerPath
-    if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "Microsoft") {
-        Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
-        throw "The downloaded .NET Framework 4.8 installer did not have a valid Microsoft signature."
-    }
-
-    Log "  Downloaded and verified: $installerPath"
-    return $installerPath
 }
 
 function Compile-Installer($version) {
@@ -154,7 +130,7 @@ function Compile-Installer($version) {
 # ========== MAIN ==========
 Write-Host ""
 Write-Host "Print Spooler Guardian - Build Script" -ForegroundColor Cyan
-Write-Host "  .NET Framework 4.8 compatibility build for Windows 7 through 11" -ForegroundColor DarkCyan
+Write-Host "  .NET Framework 3.5.1 inbox-runtime build for Windows 7 through 11" -ForegroundColor DarkCyan
 Write-Host ""
 
 $version = Get-ProjectVersion
@@ -179,7 +155,6 @@ if (-not $SkipBuild) {
 }
 
 if (-not $SkipInstaller) {
-    Ensure-Net48OfflineInstaller | Out-Null
     $installer = Compile-Installer $version
     Log ""
     Log "======= BUILD COMPLETE ======="

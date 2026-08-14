@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net48</TargetFramework>
+    <!-- Windows 7 SP1 includes .NET Framework 3.5.1. Target it so the app
+         has no separately-installed runtime prerequisite. -->
+    <TargetFramework>net35</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>PrintSpoolerGuardian</AssemblyName>
@@ -11,9 +13,9 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);publish\**</DefaultItemExcludes>
 
     <!-- Version info -->
-    <Version>2.1.0.0</Version>
-    <AssemblyVersion>2.1.0.0</AssemblyVersion>
-    <FileVersion>2.1.0.0</FileVersion>
+    <Version>2.2.0.0</Version>
+    <AssemblyVersion>2.2.0.0</AssemblyVersion>
+    <FileVersion>2.2.0.0</FileVersion>
     <Product>Print Spooler Guardian</Product>
     <Description>Zero-config USB &amp; shared printer monitoring and auto-recovery for Windows</Description>
     <Copyright>Copyright © BobanAliBrz 2025-2026</Copyright>
@@ -22,18 +24,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Framework assemblies: using these avoids runtime-loading issues on Win7. -->
+    <!-- Framework assemblies present in Windows 7's built-in .NET 3.5.1. -->
     <Reference Include="System.Management" />
     <Reference Include="System.ServiceProcess" />
-    <Reference Include="System.IO.Compression" />
-    <Reference Include="System.IO.Compression.FileSystem" />
     <Reference Include="System.Configuration" />
-    <Reference Include="System.Net.Http" />
     <Reference Include="System.Xml" />
-    <Reference Include="Microsoft.CSharp" />
   </ItemGroup>
 
-  <!-- Enables net48 builds on machines without local .NET Framework reference assemblies. -->
+  <!-- Enables net35 builds on machines without local .NET Framework reference assemblies. -->
   <ItemGroup>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
   </ItemGroup>

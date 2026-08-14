@@ -33,7 +33,7 @@ That's it. It starts monitoring immediately. A printer icon appears in the syste
 ## Requirements
 
 - **OS**: Windows 7 SP1 / 8 / 8.1 / 10 / 11 (32-bit & 64-bit)
-- **Runtime**: .NET Framework 4.8. The installer includes Microsoft's offline runtime installer and installs it only when required.
+- **Runtime**: Windows 7 SP1's built-in .NET Framework 3.5.1. No runtime package is installed or changed.
 - **RAM**: ~30 MB | **CPU**: Negligible
 
 ---
@@ -53,7 +53,7 @@ That's it. It starts monitoring immediately. A printer icon appears in the syste
 
 ## Auto-Updates
 
-Once running, it checks **BobanAliBrz/PrinterResetAliBrz** releases every 24 hours. Upload a new release ZIP as a GitHub Release and all deployed PCs will auto-update within a day.
+Automatic updates are disabled in the Windows 7 inbox-runtime build because older machines cannot reliably make the modern TLS connection to GitHub. Install newer releases using their installer.
 
 ---
 
@@ -71,12 +71,12 @@ Once running, it checks **BobanAliBrz/PrinterResetAliBrz** releases every 24 hou
 ## Project Structure
 
 ```
-├── PrintSpoolerGuardian/         # Main app (.NET Framework 4.8)
+├── PrintSpoolerGuardian/         # Main app (.NET Framework 3.5.1)
 │   ├── app.config                # Zero-config defaults
 │   ├── Program.cs                # Entry point + tray icon
 │   ├── Engine/
 │   │   ├── RecoveryEngine.cs     # USB + Shared printer recovery
-│   │   └── AutoUpdater.cs        # GitHub auto-update
+│   │   └── AutoUpdater.cs        # Documents manual-update mode on older Windows
 │   ├── Services/
 │   │   ├── PrintMonitorService.cs # Main loop (WMI + polling)
 │   │   ├── PrintJobDetector.cs    # WMI queries

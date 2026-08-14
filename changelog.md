@@ -4,6 +4,18 @@ All notable changes to Print Spooler Guardian are recorded here.
 
 ## [Unreleased]
 
+## [2.2.0.0] - 2026-08-14
+
+### Changed
+
+- Retargeted the application to Windows 7 SP1's built-in .NET Framework 3.5.1, removing the .NET Framework 4.8 prerequisite and all machine-wide runtime changes.
+- Reworked monitoring and recovery to use background threads instead of Task/async APIs unavailable in .NET Framework 3.5.1.
+- Disabled automatic GitHub updates on this legacy-compatible build; new releases are installed with their installer.
+
+### Fixed
+
+- Avoid the Windows 7 certificate-chain failure that prevented the .NET Framework 4.8 offline installer from starting on unpatched fleet PCs.
+
 ## [2.1.0.0] - 2026-08-14
 
 ### Changed

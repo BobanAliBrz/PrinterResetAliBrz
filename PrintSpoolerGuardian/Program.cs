@@ -3,10 +3,10 @@ using System.Configuration;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace PrintSpoolerGuardian
@@ -16,37 +16,24 @@ namespace PrintSpoolerGuardian
         private static NotifyIcon _trayIcon;
         private static ContextMenuStrip _trayMenu;
         private static PrintMonitorService _monitorService;
-        private static CancellationTokenSource _cts;
+        private static Thread _monitorThread;
+        private static System.Windows.Forms.Timer _pauseTimer;
 
         [STAThread]
         static void Main()
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-
-            _cts = new CancellationTokenSource();
-
-            // Ensure log directory exists
             var logDir = ConfigurationManager.AppSettings["LogDirectory"] ?? @"C:\ProgramData\PrintSpoolerGuardian";
-            if (!Directory.Exists(logDir))
-                Directory.CreateDirectory(logDir);
-
-            // Register for auto-start on all users (admin required)
+            if (!Directory.Exists(logDir)) Directory.CreateDirectory(logDir);
             RegisterStartup();
-
-            // Start the monitoring service
             _monitorService = new PrintMonitorService();
-            var monitorTask = Task.Run(() => _monitorService.RunAsync(_cts.Token));
-
-            // Setup tray icon
+            _monitorThread = new Thread(_monitorService.Run) { IsBackground = true, Name = "Print Spooler Guardian monitor" };
+            _monitorThread.Start();
             SetupTrayIcon();
-
-            Application.Run(new ApplicationContext());
-
-            // Cleanup
-            _cts.Cancel();
-            _monitorService?.StopAsync().Wait();
-            monitorTask.Wait(5000);
+            Application.Run(new GuardianApplicationContext());
+            _monitorService.RequestStop();
+            _monitorThread.Join(5000);
         }
 
         private static void SetupTrayIcon()
@@ -56,148 +43,77 @@ namespace PrintSpoolerGuardian
             _trayMenu.Items.Add("Run Recovery Now", null, RunRecoveryClick);
             _trayMenu.Items.Add("Pause Monitoring (30min)", null, PauseMonitoringClick);
             _trayMenu.Items.Add("Exit", null, ExitClick);
-
-            _trayIcon = new NotifyIcon
-            {
-                Icon = IconHelper.CreatePrinterIcon(),
-                ContextMenuStrip = _trayMenu,
-                Visible = true,
-                Text = "Print Spooler Guardian"
-            };
-            _trayIcon.DoubleClick += (s, e) => ShowStatusClick(s, e);
-
-            var balloonThread = new Thread(ShowBalloonThread)
-            {
-                IsBackground = true
-            };
+            _trayIcon = new NotifyIcon { Icon = IconHelper.CreatePrinterIcon(), ContextMenuStrip = _trayMenu, Visible = true, Text = "Print Spooler Guardian" };
+            _trayIcon.DoubleClick += ShowStatusClick;
+            var balloonThread = new Thread(delegate() { Thread.Sleep(2000); _trayIcon.ShowBalloonTip(3000, "Print Spooler Guardian", "Monitoring started. Click for status.", ToolTipIcon.Info); }) { IsBackground = true };
             balloonThread.Start();
-        }
-
-        private static void ShowBalloonThread()
-        {
-            Thread.Sleep(2000);
-            _trayIcon.ShowBalloonTip(3000, "Print Spooler Guardian",
-                "Monitoring started. Click for status.", ToolTipIcon.Info);
         }
 
         private static void ShowStatusClick(object sender, EventArgs e)
         {
             try
             {
-                var status = _monitorService?.GetStatus();
-                var msg = status != null
-                    ? $"Status: {status}\n\nLast Check: {_monitorService.LastCheckTime:HH:mm:ss}\nRecoveries This Hour: {_monitorService.RecoveriesThisHour}\nUptime: {GetUptime()}"
-                    : "Service not initialized yet.";
-                MessageBox.Show(msg, "Print Spooler Guardian - Status",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                string status = _monitorService == null ? "Service not initialized yet." : _monitorService.GetStatus();
+                MessageBox.Show("Status: " + status + "\n\nLast Check: " + _monitorService.LastCheckTime.ToString("HH:mm:ss") + "\nRecoveries This Hour: " + _monitorService.RecoveriesThisHour + "\nUptime: " + GetUptime(), "Print Spooler Guardian - Status", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error: {ex.Message}", "Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            catch (Exception ex) { MessageBox.Show("Error: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
 
         private static string GetUptime()
         {
-            // Simple uptime based on process start
             var uptime = DateTime.Now - Process.GetCurrentProcess().StartTime;
-            return $"{(int)uptime.TotalHours}h {uptime.Minutes}m {uptime.Seconds}s";
+            return (int)uptime.TotalHours + "h " + uptime.Minutes + "m " + uptime.Seconds + "s";
         }
 
         private static void RunRecoveryClick(object sender, EventArgs e)
         {
-            Task.Run(async () =>
+            var recoveryThread = new Thread(delegate()
             {
-                _trayIcon.ShowBalloonTip(2000, "Print Spooler Guardian",
-                    "Running recovery now...", ToolTipIcon.Warning);
-                await _monitorService?.ForceRecoveryAsync();
-                _trayIcon.ShowBalloonTip(2000, "Print Spooler Guardian",
-                    "Recovery complete. Check log for details.", ToolTipIcon.Info);
-            });
+                _trayIcon.ShowBalloonTip(2000, "Print Spooler Guardian", "Running recovery now...", ToolTipIcon.Warning);
+                _monitorService.ForceRecovery();
+                _trayIcon.ShowBalloonTip(2000, "Print Spooler Guardian", "Recovery complete. Check log for details.", ToolTipIcon.Info);
+            }) { IsBackground = true, Name = "Manual printer recovery" };
+            recoveryThread.Start();
         }
-
-        private static DateTime _pauseUntil = DateTime.MinValue;
 
         private static void PauseMonitoringClick(object sender, EventArgs e)
         {
-            _pauseUntil = DateTime.Now.AddMinutes(30);
-            _monitorService?.Pause(30);
-            _trayIcon.ShowBalloonTip(2000, "Print Spooler Guardian",
-                "Monitoring paused for 30 minutes.", ToolTipIcon.Warning);
-
-            // ToolStripItemCollection uses integer index (0=Status, 1=Recovery, 2=Pause, 3=Exit)
-            var menuItem = _trayMenu.Items[2];
-            menuItem.Enabled = false;
-
-            Task.Delay(TimeSpan.FromMinutes(30)).ContinueWith(_ =>
-            {
-                menuItem.Enabled = true;
-            });
+            _monitorService.Pause(30);
+            _trayIcon.ShowBalloonTip(2000, "Print Spooler Guardian", "Monitoring paused for 30 minutes.", ToolTipIcon.Warning);
+            _trayMenu.Items[2].Enabled = false;
+            _pauseTimer = new System.Windows.Forms.Timer();
+            _pauseTimer.Interval = 30 * 60 * 1000;
+            _pauseTimer.Tick += delegate { _pauseTimer.Stop(); _pauseTimer.Dispose(); _pauseTimer = null; _trayMenu.Items[2].Enabled = true; };
+            _pauseTimer.Start();
         }
 
-        /// <summary>
-        /// Creates a shortcut in the All Users Startup folder so the app
-        /// launches for every user at logon. Only runs when elevated.
-        /// </summary>
         private static void RegisterStartup()
         {
             try
             {
-                var isAdmin = new WindowsPrincipal(WindowsIdentity.GetCurrent())
-                    .IsInRole(WindowsBuiltInRole.Administrator);
-
-                if (!isAdmin)
-                {
-                    Logger.Debug("Not running as admin — skipping all-users startup registration");
-                    return;
-                }
-
-                var startupDir = Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup);
+                var principal = new WindowsPrincipal(WindowsIdentity.GetCurrent());
+                if (!principal.IsInRole(WindowsBuiltInRole.Administrator)) { Logger.Debug("Not running as admin — skipping all-users startup registration"); return; }
+                var startupDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    @"Microsoft\Windows\Start Menu\Programs\Startup");
                 var shortcutPath = Path.Combine(startupDir, "Print Spooler Guardian.lnk");
-
-                if (File.Exists(shortcutPath))
-                {
-                    Logger.Debug("Startup shortcut already exists");
-                    return;
-                }
-
-                Logger.Info("Registering for auto-start on all users (Common Startup)...");
-
-                var exePath = Process.GetCurrentProcess().MainModule.FileName;
-                Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-                dynamic shell = Activator.CreateInstance(shellType);
-                dynamic shortcut = shell.CreateShortcut(shortcutPath);
-                shortcut.TargetPath = exePath;
-                shortcut.Description = "Print Spooler Guardian — printer auto-recovery";
-                shortcut.WorkingDirectory = Path.GetDirectoryName(exePath);
-                shortcut.Save();
-                Marshal.FinalReleaseComObject(shortcut);
-                Marshal.FinalReleaseComObject(shell);
-
+                if (File.Exists(shortcutPath)) { Logger.Debug("Startup shortcut already exists"); return; }
+                var shellType = Type.GetTypeFromProgID("WScript.Shell");
+                if (shellType == null) throw new InvalidOperationException("WScript.Shell is unavailable.");
+                object shell = Activator.CreateInstance(shellType);
+                object shortcut = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { shortcutPath });
+                Type shortcutType = shortcut.GetType();
+                shortcutType.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { Process.GetCurrentProcess().MainModule.FileName });
+                shortcutType.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut, new object[] { "Print Spooler Guardian — printer auto-recovery" });
+                shortcutType.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName) });
+                shortcutType.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
+                Marshal.FinalReleaseComObject(shortcut); Marshal.FinalReleaseComObject(shell);
                 Logger.Info("Startup shortcut created in: " + startupDir);
             }
-            catch (Exception ex)
-            {
-                Logger.Warn($"Could not register startup: {ex.Message}");
-            }
+            catch (Exception ex) { Logger.Warn("Could not register startup: " + ex.Message); }
         }
 
-        private static void ExitClick(object sender, EventArgs e)
-        {
-            _trayIcon.Visible = false;
-            _cts.Cancel();
-            Application.Exit();
-        }
+        private static void ExitClick(object sender, EventArgs e) { _trayIcon.Visible = false; _monitorService.RequestStop(); Application.Exit(); }
     }
-}
 
-// Minimal ApplicationContext to keep tray alive
-namespace PrintSpoolerGuardian
-{
-    using System.Windows.Forms;
-    class ApplicationContext : System.Windows.Forms.ApplicationContext
-    {
-        public ApplicationContext() { }
-    }
+    class GuardianApplicationContext : System.Windows.Forms.ApplicationContext { }
 }
