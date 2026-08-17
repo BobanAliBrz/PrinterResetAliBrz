@@ -4,7 +4,13 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+        <!--
+          The tray executable must be launchable from Explorer and at logon
+          without Windows displaying a UAC consent prompt.  The installer
+          registers an elevated, interactive Task Scheduler task for normal
+          operation; Program.cs forwards ordinary launches to that task.
+        -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>

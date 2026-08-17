@@ -3,7 +3,13 @@
 All notable changes to Print Spooler Guardian are recorded here.
 
 ## [Unreleased]
- 
+
+## [2.3.1.0] - 2026-08-17
+
+### Fixed
+
+- Replaced the All Users Startup shortcut with an elevated interactive Task Scheduler logon task. The tray app now starts after sign-in on Windows 10 without being blocked by an unattended UAC prompt.
+- Changed the application manifest to `asInvoker` and removed the installer's `runas` launch verb, so opening the app no longer displays a UAC prompt. A normal launch requests the registered elevated task instead.
 ## [2.3.0.0] - 2026-08-17
 
 - Added `RawPrinterResetter` to send raw PJL, Universal Exit Language (UEL), and ESC E reset sequences directly to printers via the Win32 Spooler API (`winspool.drv`), helping unhang host-based/GDI printers (e.g. HP LaserJet P1005) stuck in unclosed raster sessions.

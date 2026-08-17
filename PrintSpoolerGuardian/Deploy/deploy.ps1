@@ -40,6 +40,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ServiceName = "PrintSpoolerGuardian"
+$StartupTaskName = "Print Spooler Guardian"
 $RequiredNetVersion = "4.8"
 
 function Log($msg) {
@@ -221,30 +222,30 @@ function Install-Startup {
         Log "  ✓ Old service removed"
     }
 
-    # Create All Users Startup shortcut so every user gets it at logon
-    Log "Registering for auto-start on all users..."
-    $startupDir = [Environment]::GetFolderPath("CommonStartup")
-    $shortcutPath = Join-Path $startupDir "Print Spooler Guardian.lnk"
+    # A Startup-folder shortcut cannot start the privileged recovery process
+    # without UAC. Use an interactive elevated task instead.
+    Log "Registering elevated logon task..."
+    $shortcutPath = Join-Path ([Environment]::GetFolderPath("CommonStartup")) "Print Spooler Guardian.lnk"
 
     try {
-        $ws = New-Object -ComObject WScript.Shell
-        $sc = $ws.CreateShortcut($shortcutPath)
-        $sc.TargetPath = $exePath
-        $sc.Description = "Print Spooler Guardian — printer auto-recovery"
-        $sc.WorkingDirectory = $dir
-        $sc.Save()
-        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($sc) | Out-Null
-        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($ws) | Out-Null
-        Log "  ✓ Startup shortcut created: $shortcutPath"
+        # Remove the old startup mechanism when upgrading.
+        Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue
+
+        $taskCommand = '"{0}" /scheduled' -f $exePath
+        $taskOutput = & schtasks.exe /Create /TN $StartupTaskName /TR $taskCommand /SC ONLOGON /RL HIGHEST /IT /F 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "schtasks.exe exited with code ${LASTEXITCODE}: $taskOutput"
+        }
+        Log "  ✓ Elevated startup task created: $StartupTaskName"
     } catch {
-        Log "  ✗ Failed to create startup shortcut: $_"
+        Log "  ✗ Failed to create elevated startup task: $_"
         return $false
     }
 
     # Launch the app now (so admin doesn't have to log off/on)
     Log "Starting Print Spooler Guardian..."
     try {
-        Start-Process -FilePath $exePath -Verb RunAs -WindowStyle Hidden
+        Start-Process -FilePath $exePath -WindowStyle Hidden
         Log "  ✓ Launched successfully"
     } catch {
         Log "  ⚠ Could not launch (will auto-start on next logon): $_"
@@ -311,7 +312,7 @@ if (!$installDir) {
 # Step 3: Update config
 Update-AppConfig -dir $installDir
 
-# Step 4: Register startup (All Users Startup folder)
+# Step 4: Register elevated startup task
 if (!(Install-Startup -dir $installDir)) {
     Log "ERROR: Startup registration failed."
     if (!$Silent) { Read-Host "Press Enter to exit" }
@@ -328,14 +329,14 @@ Log "═════════════════════════
 Log "  ✓ DEPLOYMENT COMPLETE"
 Log "  Location:   $InstallDir"
 Log "  Log file:   $InstallDir\PrintSpoolerGuardian.log"
-Log "  Auto-start: All Users Startup folder (every user)"
+Log "  Auto-start: Task Scheduler logon task (installing user)"
 Log "═══════════════════════════════════════════════════════════"
 Log ""
 Log "Print Spooler Guardian is now running. It will auto-start"
-Log "for every user at logon. Edit app.config to customize."
+Log "for the installing user at logon. Edit app.config to customize."
 Log ""
 Log "To stop: right-click the tray icon and select Exit."
-Log "To uninstall: delete the startup shortcut + install folder."
+Log "To uninstall: delete the '$StartupTaskName' scheduled task + install folder."
 
 if (!$Silent) {
     Read-Host "Press Enter to exit"

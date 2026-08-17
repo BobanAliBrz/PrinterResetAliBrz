@@ -3,8 +3,6 @@ using System.Configuration;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
-using System.Reflection;
-using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Threading;
 using System.Windows.Forms;
@@ -13,6 +11,8 @@ namespace PrintSpoolerGuardian
 {
     static class Program
     {
+        internal const string StartupTaskName = "Print Spooler Guardian";
+        private const string ScheduledLaunchArgument = "/scheduled";
         private static NotifyIcon _trayIcon;
         private static ContextMenuStrip _trayMenu;
         private static PrintMonitorService _monitorService;
@@ -20,13 +20,21 @@ namespace PrintSpoolerGuardian
         private static System.Windows.Forms.Timer _pauseTimer;
 
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
+            // The scheduled task is registered with the highest available
+            // privilege level.  A direct Explorer launch stays UAC-free and
+            // asks that task to start the privileged tray instance instead.
+            if (!WasStartedByScheduledTask(args) && !IsAdministrator())
+            {
+                if (TryStartScheduledInstance()) return;
+                Logger.Warn("Elevated startup task was unavailable; continuing without elevation.");
+            }
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             var logDir = ConfigurationManager.AppSettings["LogDirectory"] ?? @"C:\ProgramData\PrintSpoolerGuardian";
             if (!Directory.Exists(logDir)) Directory.CreateDirectory(logDir);
-            RegisterStartup();
             _monitorService = new PrintMonitorService();
             _monitorThread = new Thread(_monitorService.Run) { IsBackground = true, Name = "Print Spooler Guardian monitor" };
             _monitorThread.Start();
@@ -87,29 +95,50 @@ namespace PrintSpoolerGuardian
             _pauseTimer.Start();
         }
 
-        private static void RegisterStartup()
+        private static bool WasStartedByScheduledTask(string[] args)
+        {
+            if (args == null) return false;
+            foreach (string arg in args)
+            {
+                if (string.Equals(arg, ScheduledLaunchArgument, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+
+        private static bool IsAdministrator()
+        {
+            var principal = new WindowsPrincipal(WindowsIdentity.GetCurrent());
+            return principal.IsInRole(WindowsBuiltInRole.Administrator);
+        }
+
+        private static bool TryStartScheduledInstance()
         {
             try
             {
-                var principal = new WindowsPrincipal(WindowsIdentity.GetCurrent());
-                if (!principal.IsInRole(WindowsBuiltInRole.Administrator)) { Logger.Debug("Not running as admin — skipping all-users startup registration"); return; }
-                var startupDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                    @"Microsoft\Windows\Start Menu\Programs\Startup");
-                var shortcutPath = Path.Combine(startupDir, "Print Spooler Guardian.lnk");
-                if (File.Exists(shortcutPath)) { Logger.Debug("Startup shortcut already exists"); return; }
-                var shellType = Type.GetTypeFromProgID("WScript.Shell");
-                if (shellType == null) throw new InvalidOperationException("WScript.Shell is unavailable.");
-                object shell = Activator.CreateInstance(shellType);
-                object shortcut = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { shortcutPath });
-                Type shortcutType = shortcut.GetType();
-                shortcutType.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { Process.GetCurrentProcess().MainModule.FileName });
-                shortcutType.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut, new object[] { "Print Spooler Guardian — printer auto-recovery" });
-                shortcutType.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName) });
-                shortcutType.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
-                Marshal.FinalReleaseComObject(shortcut); Marshal.FinalReleaseComObject(shell);
-                Logger.Info("Startup shortcut created in: " + startupDir);
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = Path.Combine(Environment.SystemDirectory, "schtasks.exe"),
+                    Arguments = "/Run /TN \"" + StartupTaskName + "\"",
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+                using (Process taskScheduler = Process.Start(startInfo))
+                {
+                    taskScheduler.WaitForExit(5000);
+                    if (!taskScheduler.HasExited || taskScheduler.ExitCode == 0)
+                    {
+                        Logger.Info("Requested elevated tray instance from Task Scheduler.");
+                        return true;
+                    }
+                    Logger.Warn("Task Scheduler returned exit code " + taskScheduler.ExitCode + " while starting the tray instance.");
+                }
             }
-            catch (Exception ex) { Logger.Warn("Could not register startup: " + ex.Message); }
+            catch (Exception ex)
+            {
+                Logger.Warn("Could not start the elevated startup task: " + ex.Message);
+            }
+            return false;
         }
 
         private static void ExitClick(object sender, EventArgs e) { _trayIcon.Visible = false; _monitorService.RequestStop(); Application.Exit(); }

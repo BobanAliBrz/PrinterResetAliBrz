@@ -17,14 +17,14 @@ Automatically detects when a USB or shared (UNC) printer gets stuck, and recover
 1. Go to **[Releases](https://github.com/BobanAliBrz/PrinterResetAliBrz/releases)** on GitHub
 2. Download the latest `PrintSpoolerGuardian_vX.X.X.zip`
 3. Extract it anywhere on the target PC
-4. **Right-click** `PrintSpoolerGuardian.exe` → **Run as Administrator**
+4. Run `PrintSpoolerGuardian.exe` normally. The installed scheduled task supplies the required privileges without a launch UAC prompt.
 
 That's it. It starts monitoring immediately. A printer icon appears in the system tray. It also registers itself to auto-start for every user on that PC on next login.
 
 ### Option 2: Mass Deployment (SCCM / PDQ / Intune)
 
 ```powershell
-# Run as Administrator on each target PC
+# Run normally on each target PC (the installed task runs elevated)
 .\PrintSpoolerGuardian\Deploy\deploy.ps1 -Silent -GitHubRepo "BobanAliBrz/PrinterResetAliBrz"
 ```
 

@@ -1,7 +1,7 @@
 # Print Spooler Guardian — Maintainer Memory
 
 > **Repository:** `BobanAliBrz/PrinterResetAliBrz`
-> **Current version:** `2.3.0.0`
+> **Current version:** `2.3.1.0`
 > **Last reviewed:** 2026-08-17
 
 ## Purpose
@@ -15,7 +15,7 @@ The application monitors print jobs and printer error states using WMI events pl
 - **App:** `PrintSpoolerGuardian/`, a WinForms tray app targeting `net35`, the runtime included with Windows 7 SP1.
 - **Deployment:** `win-x64` and `win-x86` builds in a unified installer. It has no runtime bootstrapper and makes no machine-wide .NET changes.
 - **Installer:** `PrintSpoolerGuardian/Installer/setup.iss` packages both architectures into one administrator-required Inno Setup executable.
-- **Startup:** the installer creates an All Users Startup shortcut. The app is not a Windows service.
+- **Startup:** the installer creates an interactive Task Scheduler logon task that runs at the highest available privilege level for the installing user. The app is not a Windows service.
 - **Updates:** automatic GitHub updates are disabled in this legacy-compatible build; deploy newer versions with their installer.
 
 ### Main code locations
@@ -66,12 +66,12 @@ The output is `dist/PrintSpoolerGuardian_Setup_v<version>.exe`. For a release, c
 Whenever a build is made and published to GitHub, **also copy the installer executable to the deployment share:**
 `\\10.0.135.252\Ono_Kad\Setup novog racunara\Print Spooler Guardian`
 
-The next release artifact is `dist/PrintSpoolerGuardian_Setup_v2.3.0.0.exe`.
+The next release artifact is `dist/PrintSpoolerGuardian_Setup_v2.3.1.0.exe`.
 
 ## Compatibility and Constraints
 
 - The installer declares Windows 7 SP1 and later, on 32-bit and 64-bit systems. Windows 7 SP1's inbox .NET Framework 3.5.1 is the compatibility baseline.
-- Elevation is required to operate the spooler and reset PnP devices; users can see a UAC prompt at launch.
+- Elevation is required to operate the spooler and reset PnP devices. The installed logon task supplies it; the executable itself is `asInvoker` so direct launches do not display UAC.
 - WMI eventing is an acceleration path; polling must remain functional because WMI subscriptions can be unreliable.
 - Do not reintroduce Windows Service installation while the app depends on a visible tray UI.
 - Be cautious with trimming: `System.Management` and `System.Configuration.ConfigurationManager` are explicitly rooted because they use reflection.

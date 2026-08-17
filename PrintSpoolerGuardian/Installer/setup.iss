@@ -6,10 +6,11 @@
 #define MyAppPublisher "BobanAliBrz"
 #define MyAppURL "https://github.com/BobanAliBrz/PrinterResetAliBrz"
 #define MyAppExeName "PrintSpoolerGuardian.exe"
+#define MyStartupTaskName "Print Spooler Guardian"
 
 ; Version is passed via /dMyAppVersion= from build.ps1, or default here
 #ifndef MyAppVersion
-  #define MyAppVersion "2.3.0.0"
+  #define MyAppVersion "2.3.1.0"
 #endif
 
 [Setup]
@@ -68,14 +69,21 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{a
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"; WorkingDir: "{app}"
 Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "Print Spooler Guardian — printer auto-recovery"
 
-; Register in All Users Startup folder (auto-start for every user)
-Name: "{commonstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Comment: "Print Spooler Guardian"
-
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now"; Flags: postinstall nowait skipifsilent runascurrentuser shellexec; Verb: runas; Check: ShouldLaunchApplication
+; A Startup-folder shortcut cannot silently elevate the recovery process at
+; sign-in. Run the tray process through an interactive, elevated logon task
+; instead. /scheduled prevents Program.cs from forwarding this instance back
+; to the task if the installing account is not elevated by default.
+Filename: "{sys}\schtasks.exe"; Parameters: "/Create /TN ""{#MyStartupTaskName}"" /TR """"{app}\{#MyAppExeName}"" /scheduled"" /SC ONLOGON /RL HIGHEST /IT /F"; Flags: runhidden waituntilterminated; StatusMsg: "Registering elevated startup task..."
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now"; Flags: postinstall nowait skipifsilent runascurrentuser; Check: ShouldLaunchApplication
 
 [UninstallRun]
-Filename: "{app}\{#MyAppExeName}"; Parameters: "/uninstall"; Flags: runhidden; RunOnceId: "StopGuardian"
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""{#MyStartupTaskName}"" /F"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveStartupTask"
+
+[InstallDelete]
+; Remove the pre-2.3.0 Startup shortcut so an upgrade does not launch a second
+; tray instance alongside the scheduled task.
+Type: files; Name: "{commonstartup}\{#MyAppName}.lnk"
 
 [Code]
 function ShouldLaunchApplication(): Boolean;

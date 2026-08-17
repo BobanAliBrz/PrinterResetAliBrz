@@ -56,7 +56,7 @@ Only escalates if the previous step didn't fix the problem.
 - **Rate limit**: Max 3 recoveries per hour
 - **Duplicate prevention**: Same job won't trigger recovery twice within 10 minutes
 - **Per-printer targeting**: Only affects the stuck printer, never system-wide
-- **Admin required**: UAC prompt — the app needs admin rights to restart the spooler and reset USB devices
+- **No launch UAC prompt**: the installed app uses an elevated Task Scheduler logon task for spooler and USB-device recovery; ordinary shortcut launches remain quiet
 
 ## Requirements
 
@@ -64,7 +64,7 @@ Only escalates if the previous step didn't fix the problem.
 |---|---|
 | **OS** | Windows 7 (incl. early pre-SP1, 32-bit & 64-bit) / 8 / 8.1 / 10 / 11 |
 | **.NET** | Requires .NET Framework 4.8 (the setup installer downloads & installs it automatically if missing) |
-| **Permissions** | Administrator (for spooler restart, USB device reset, printer re-add) |
+| **Permissions** | Administrator during installation; the installed logon task supplies the privileges needed for spooler restart, USB device reset, and printer re-add |
 | **RAM** | ~30 MB |
 | **CPU** | Negligible — just WMI queries every 30s |
 
@@ -86,7 +86,7 @@ All types are **auto-detected** — no manual configuration needed.
 
 1. Download the ZIP from [Releases](https://github.com/BobanAliBrz/PrinterResetAliBrz/releases)
 2. Extract it anywhere
-3. Right-click `PrintSpoolerGuardian.exe` → **Run as Administrator**
+3. Run `PrintSpoolerGuardian.exe` normally. It starts its registered elevated task without showing a UAC prompt.
 
 A printer icon appears in the system tray. It auto-registers to start for all users on next login.
 
@@ -106,7 +106,7 @@ dotnet publish -c Release -r win-x64 --framework-dependent -o .\publish
 
 ### Auto-Start
 
-The app registers itself in the **All Users Startup folder** (`CommonStartup`) when first run as Administrator — no service setup needed. Every user on the machine gets it at login.
+The installer registers an interactive **Task Scheduler** task named `Print Spooler Guardian`. At logon it starts the tray app at the highest privilege level available, without a UAC prompt. The task belongs to the account that installs the app, so install it while signed in as the account that will use the tray icon.
 
 ---
 
@@ -137,7 +137,7 @@ Edit the `app.config` next to the executable:
 ## Uninstall
 
 1. Right-click tray icon → **Exit**
-2. Delete `C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\Print Spooler Guardian.lnk`
+2. The uninstaller removes the `Print Spooler Guardian` scheduled task automatically.
 3. Delete `C:\ProgramData\PrintSpoolerGuardian\`
 
 Or use the bootstrapper installer's **Uninstall** button.
@@ -179,7 +179,7 @@ Auto-rotates when exceeding 5 MB.
 
 | Symptom | Fix |
 |---------|-----|
-| App won't start | Run as Administrator (right-click → Run as admin) |
+| App won't start | Re-run the installer from the account that uses the tray icon so it can recreate the `Print Spooler Guardian` scheduled task. |
 | USB reset fails | Check Device Manager — is the printer showing up? |
 | False positives | Increase `StaleJobThresholdSeconds` or set `WatchedPrinters` |
 | Spooler keeps failing | Check `C:\Windows\System32\spool\PRINTERS\` for corrupt files manually |
