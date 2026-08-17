@@ -82,20 +82,14 @@ Restart-Service -Name Spooler -Force
 - Timeout: 30 seconds for stop, 30 seconds for start
 - After restart, re-check printer status
 
-### Step 3: Reset USB Printer Device (if Step 2 didn't help)
-- **Method A (preferred):** Disable/Enable the USB PnP device:
-  ```powershell
-  Disable-PnpDevice -InstanceId "<device_instance_id>" -Confirm:$false
-  Start-Sleep -Seconds 5
-  Enable-PnpDevice -InstanceId "<device_instance_id>" -Confirm:$false
-  ```
-- **Method B (fallback):** Use `devcon.exe` (Microsoft-signed CLI tool, redistributable):
-  ```
-  devcon disable "<hardware_id>"
-  devcon enable "<hardware_id>"
-  ```
-- **Method C (last resort):** Programmatically eject and re-enumerate the USB device using `CM_Request_Device_Eject` + Setup API. This simulates unplugging and replugging the USB cable.
-- After reset, wait for printer to re-enumerate (check device arrival events or poll `Win32_Printer` for the printer coming back online).
+### Step 3: Direct Hardware / PJL Stream Reset
+- Injects raw Universal Exit Language (`\x1b%-12345X`), `@PJL RESET`, `@PJL EOJ`, and `\x1bE` directly into the printer queue via `winspool.drv` with `RAW` data type.
+- Unhangs printers (like HP LaserJet P1005) stuck in unclosed or corrupted raster sessions without needing physical plug pulls.
+
+### Step 4: Reset USB Printer Device (if printer remains unresponsive)
+- Disable/Enable the USB PnP device (`Win32_PnPEntity`) matched via WMI and Registry (`Enum\USBPRINT`).
+- Re-enumerates the USB stack and triggers driver reload.
+- After reset, restart spooler and re-issue the stream reset sequence.
 
 ### Step 4: Full Restart (if all else fails)
 - Restart the PC (or optionally just the spooler + USB reset again with longer waits)

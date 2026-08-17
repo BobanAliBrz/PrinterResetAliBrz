@@ -107,51 +107,140 @@ namespace PrintSpoolerGuardian
 
             try
             {
+                // 1. Query Win32_PnPEntity directly for USBPRINT devices
                 using (var searcher = new ManagementObjectSearcher(
-                    "SELECT Name, PortName, DeviceID FROM Win32_Printer WHERE PortName LIKE 'USB%'"))
+                    "SELECT DeviceID, Caption FROM Win32_PnPEntity WHERE Service = 'usbprint' OR DeviceID LIKE 'USBPRINT%'"))
                 {
-                    foreach (ManagementObject printer in searcher.Get())
+                    foreach (ManagementObject entity in searcher.Get())
                     {
                         try
                         {
-                            var deviceId = printer["DeviceID"]?.ToString() ?? "";
-                            if (!string.IsNullOrEmpty(deviceId))
+                            var deviceId = entity["DeviceID"] != null ? entity["DeviceID"].ToString() : "";
+                            if (!string.IsNullOrEmpty(deviceId) && !ids.Contains(deviceId))
                                 ids.Add(deviceId);
                         }
                         catch { /* Skip */ }
                     }
                 }
+
+                // 2. Check Registry Enum\USBPRINT for any known device instances
+                try
+                {
+                    using (var usbPrintKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Enum\USBPRINT"))
+                    {
+                        if (usbPrintKey != null)
+                        {
+                            foreach (var modelKeyName in usbPrintKey.GetSubKeyNames())
+                            {
+                                using (var modelKey = usbPrintKey.OpenSubKey(modelKeyName))
+                                {
+                                    if (modelKey == null) continue;
+                                    foreach (var instanceName in modelKey.GetSubKeyNames())
+                                    {
+                                        string pnpId = @"USBPRINT\" + modelKeyName + @"\" + instanceName;
+                                        if (!ids.Contains(pnpId))
+                                            ids.Add(pnpId);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
             }
             catch (Exception ex)
             {
-                Logger.Error($"WMI query for USB printer device IDs failed: {ex.Message}");
+                Logger.Error("WMI query for USB printer device IDs failed: " + ex.Message);
             }
 
             return ids;
         }
 
         /// <summary>
-        /// Gets the device instance ID for a USB printer by its port name.
+        /// Gets the device instance ID for a USB printer by its port name and/or printer name.
         /// </summary>
-        public string GetUsbDeviceInstanceId(string portName)
+        public string GetUsbDeviceInstanceId(string portName, string printerName = null)
         {
             try
             {
-                using (var searcher = new ManagementObjectSearcher(
-                    "SELECT * FROM Win32_Printer WHERE PortName = '" +
-                    portName.Replace("'", "''") + "'"))
-                {
-                    foreach (ManagementObject printer in searcher.Get())
-                    {
-                        var deviceId = printer["DeviceID"]?.ToString() ?? "";
+                // 1. Check registry USBPRINT records first for fastest and most reliable match
+                string regMatch = ResolveUsbPnpIdFromRegistry(portName, printerName);
+                if (!string.IsNullOrEmpty(regMatch))
+                    return regMatch;
 
-                        using (var pnpSearcher = new ManagementObjectSearcher(
-                            "SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '" +
-                            deviceId.Replace("\\", "\\\\").Replace("'", "''") + "%'"))
+                // 2. Query Win32_PnPEntity for usbprint services or matching captions
+                using (var searcher = new ManagementObjectSearcher(
+                    "SELECT DeviceID, Caption, Name FROM Win32_PnPEntity WHERE Service = 'usbprint' OR DeviceID LIKE 'USBPRINT%'"))
+                {
+                    foreach (ManagementObject pnp in searcher.Get())
+                    {
+                        var devId = pnp["DeviceID"] != null ? pnp["DeviceID"].ToString() : "";
+                        var caption = pnp["Caption"] != null ? pnp["Caption"].ToString() : "";
+                        var name = pnp["Name"] != null ? pnp["Name"].ToString() : "";
+
+                        if (!string.IsNullOrEmpty(printerName))
                         {
-                            foreach (ManagementObject pnp in pnpSearcher.Get())
+                            if (caption.IndexOf(printerName, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                printerName.IndexOf(caption, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                name.IndexOf(printerName, StringComparison.OrdinalIgnoreCase) >= 0)
                             {
-                                return pnp["DeviceID"]?.ToString() ?? "";
+                                return devId;
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(portName) && devId.IndexOf(portName, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            return devId;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug("Could not resolve device instance ID for " + portName + "/" + printerName + ": " + ex.Message);
+            }
+
+            return null;
+        }
+
+        private static string ResolveUsbPnpIdFromRegistry(string portName, string printerName)
+        {
+            try
+            {
+                using (var usbPrintKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Enum\USBPRINT"))
+                {
+                    if (usbPrintKey == null) return null;
+
+                    foreach (var modelKeyName in usbPrintKey.GetSubKeyNames())
+                    {
+                        using (var modelKey = usbPrintKey.OpenSubKey(modelKeyName))
+                        {
+                            if (modelKey == null) continue;
+                            foreach (var instanceName in modelKey.GetSubKeyNames())
+                            {
+                                using (var instKey = modelKey.OpenSubKey(instanceName))
+                                {
+                                    if (instKey == null) continue;
+                                    var pName = instKey.GetValue("PortName") as string;
+                                    var friendlyName = instKey.GetValue("FriendlyName") as string;
+                                    var location = instKey.GetValue("LocationInformation") as string;
+
+                                    bool portMatch = !string.IsNullOrEmpty(portName) &&
+                                        (string.Equals(pName, portName, StringComparison.OrdinalIgnoreCase) ||
+                                         string.Equals(location, portName, StringComparison.OrdinalIgnoreCase) ||
+                                         instanceName.IndexOf(portName, StringComparison.OrdinalIgnoreCase) >= 0);
+
+                                    bool nameMatch = !string.IsNullOrEmpty(printerName) &&
+                                        ((!string.IsNullOrEmpty(friendlyName) &&
+                                          (friendlyName.IndexOf(printerName, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                           printerName.IndexOf(friendlyName, StringComparison.OrdinalIgnoreCase) >= 0)) ||
+                                         modelKeyName.IndexOf(printerName.Replace(" ", "_"), StringComparison.OrdinalIgnoreCase) >= 0);
+
+                                    if (portMatch || nameMatch)
+                                    {
+                                        return @"USBPRINT\" + modelKeyName + @"\" + instanceName;
+                                    }
+                                }
                             }
                         }
                     }
@@ -159,9 +248,8 @@ namespace PrintSpoolerGuardian
             }
             catch (Exception ex)
             {
-                Logger.Debug($"Could not resolve device instance ID for {portName}: {ex.Message}");
+                Logger.Debug("Registry USBPRINT lookup exception: " + ex.Message);
             }
-
             return null;
         }
 

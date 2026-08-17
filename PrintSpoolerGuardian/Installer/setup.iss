@@ -9,7 +9,7 @@
 
 ; Version is passed via /dMyAppVersion= from build.ps1, or default here
 #ifndef MyAppVersion
-  #define MyAppVersion "2.2.0.0"
+  #define MyAppVersion "2.3.0.0"
 #endif
 
 [Setup]

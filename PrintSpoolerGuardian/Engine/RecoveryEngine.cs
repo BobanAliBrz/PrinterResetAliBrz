@@ -14,6 +14,7 @@ namespace PrintSpoolerGuardian
     {
         private readonly SpoolerController _spooler = new SpoolerController();
         private readonly UsbPrinterResetter _usbResetter = new UsbPrinterResetter();
+        private readonly RawPrinterResetter _rawResetter = new RawPrinterResetter();
         private readonly StaleFileCleaner _fileCleaner = new StaleFileCleaner();
         private readonly PrintJobDetector _detector = new PrintJobDetector();
         private readonly List<DateTime> _recoveryHistory = new List<DateTime>();
@@ -23,6 +24,7 @@ namespace PrintSpoolerGuardian
         private readonly int _spoolerTimeoutSeconds;
         private readonly int _usbResetWaitSeconds;
         private readonly int _stepWaitSeconds;
+        private readonly bool _enableRawReset;
 
         public RecoveryEngine()
         {
@@ -31,6 +33,7 @@ namespace PrintSpoolerGuardian
             _spoolerTimeoutSeconds = GetSetting("SpoolerTimeoutSeconds", 60);
             _usbResetWaitSeconds = GetSetting("UsbResetWaitSeconds", 15);
             _stepWaitSeconds = GetSetting("StepWaitSeconds", 5);
+            _enableRawReset = GetSetting("EnableRawPrinterReset", 1) != 0;
         }
 
         public bool IsInCooldown { get { return (DateTime.Now - _lastRecoveryTime).TotalMinutes < _cooldownMinutes; } }
@@ -48,38 +51,74 @@ namespace PrintSpoolerGuardian
 
         private List<string> ExecuteUsbRecovery(PrinterConfig printer, List<string> actions)
         {
-            Logger.Info("Step 1/4: Cancelling stuck print jobs...");
+            Logger.Info("Step 1/5: Cancelling stuck print jobs...");
             _spooler.CancelAllJobs(printer.Name); actions.Add("Cancelled stuck print jobs"); WaitStep();
-            Logger.Info("Step 2/4: Cleaning stale spool files...");
+
+            Logger.Info("Step 2/5: Cleaning stale spool files...");
             var cleaned = _fileCleaner.CleanStaleFiles(GetSetting("StaleFileThresholdSeconds", 300));
             actions.Add("Cleaned " + cleaned + " stale spool files"); WaitStep();
-            Logger.Info("Step 3/4: Restarting Print Spooler...");
+
+            Logger.Info("Step 3/5: Restarting Print Spooler...");
             if (_spooler.Restart(_spoolerTimeoutSeconds))
             {
                 actions.Add("Restarted Print Spooler (OK)"); WaitStep();
-                if (!IsPrinterStillBroken(printer))
+            }
+            else
+            {
+                actions.Add("Restarted Print Spooler (FAILED)");
+            }
+
+            if (_enableRawReset)
+            {
+                Logger.Info("Step 4/5: Sending hardware PJL/UEL stream reset to printer...");
+                if (_rawResetter.SendReset(printer.Name))
                 {
-                    Logger.Info("Recovery successful after spooler restart.");
-                    actions.Add("RESULT: Problem resolved after spooler restart"); RecordRecovery(); return actions;
+                    actions.Add("Sent PJL/UEL hardware reset sequence to printer"); WaitStep();
+                }
+                else
+                {
+                    actions.Add("PJL/UEL stream reset skipped or failed");
                 }
             }
-            else actions.Add("Restarted Print Spooler (FAILED)");
 
-            Logger.Info("Step 4/4: Resetting USB device...");
-            var deviceId = _detector.GetUsbDeviceInstanceId(printer.PortName);
-            if (string.IsNullOrEmpty(deviceId)) actions.Add("Could not determine USB device instance ID — skipping USB reset");
+            if (!IsPrinterStillBroken(printer))
+            {
+                Logger.Info("Recovery successful after spooler restart and stream reset.");
+                actions.Add("RESULT: Problem resolved after spooler restart & printer reset");
+                RecordRecovery();
+                return actions;
+            }
+
+            Logger.Info("Step 5/5: Resetting USB PnP device...");
+            var deviceId = _detector.GetUsbDeviceInstanceId(printer.PortName, printer.Name);
+            if (string.IsNullOrEmpty(deviceId))
+            {
+                actions.Add("Could not determine USB device instance ID — skipping USB reset");
+            }
             else if (_usbResetter.Reset(deviceId, _usbResetWaitSeconds))
             {
                 actions.Add("Reset USB device: " + deviceId); WaitStep();
                 if (_spooler.Restart(_spoolerTimeoutSeconds))
                 {
                     actions.Add("Restarted Print Spooler post-USB-reset (OK)");
-                    actions.Add("RESULT: Full recovery (USB reset + spooler restart)");
+                    if (_enableRawReset)
+                    {
+                        _rawResetter.SendReset(printer.Name);
+                    }
+                    actions.Add("RESULT: Full recovery (spooler + hardware reset + USB PnP toggle)");
                 }
-                else actions.Add("Restarted Print Spooler post-USB-reset (FAILED)");
+                else
+                {
+                    actions.Add("Restarted Print Spooler post-USB-reset (FAILED)");
+                }
             }
-            else actions.Add("USB device reset FAILED: " + deviceId);
-            RecordRecovery(); return actions;
+            else
+            {
+                actions.Add("USB device reset FAILED: " + deviceId);
+            }
+
+            RecordRecovery();
+            return actions;
         }
 
         private List<string> ExecuteSharedRecovery(PrinterConfig printer, List<string> actions)

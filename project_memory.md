@@ -1,8 +1,8 @@
 # Print Spooler Guardian — Maintainer Memory
 
 > **Repository:** `BobanAliBrz/PrinterResetAliBrz`
-> **Current version:** `2.2.0.0`
-> **Last reviewed:** 2026-08-14
+> **Current version:** `2.3.0.0`
+> **Last reviewed:** 2026-08-17
 
 ## Purpose
 
@@ -24,9 +24,10 @@ The application monitors print jobs and printer error states using WMI events pl
 |---|---|
 | `Program.cs` | Application entry point, tray UI, startup registration |
 | `Services/PrintMonitorService.cs` | WMI event watcher, polling loop, job deduplication |
-| `Services/PrintJobDetector.cs` | WMI queries and printer connection classification |
+| `Services/PrintJobDetector.cs` | WMI queries, printer classification, USB PnP device ID resolution |
 | `Engine/RecoveryEngine.cs` | Recovery orchestration, cooldown, and hourly rate limiting |
 | `Services/SpoolerController.cs` | Print Spooler and job operations |
+| `Services/RawPrinterResetter.cs` | Direct PJL/UEL/ESC E raw stream flush to printer |
 | `Services/UsbPrinterResetter.cs` | WMI PnP disable/enable for USB devices |
 | `Services/StaleFileCleaner.cs` | Old `.SPL`/`.SHD` cleanup |
 | `Engine/AutoUpdater.cs` | GitHub Release discovery, download, extraction, restart |
@@ -62,7 +63,7 @@ Build the installer from the app directory:
 
 The output is `dist/PrintSpoolerGuardian_Setup_v<version>.exe`. For a release, create and push a matching Git tag and attach that installer to the GitHub Release. Use the release notes to state the user-visible changes and any compatibility impact.
 
-The next release artifact is `dist/PrintSpoolerGuardian_Setup_v2.2.0.0.exe`.
+The next release artifact is `dist/PrintSpoolerGuardian_Setup_v2.3.0.0.exe`.
 
 ## Compatibility and Constraints
 

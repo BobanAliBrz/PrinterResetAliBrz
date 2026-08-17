@@ -3,8 +3,15 @@
 All notable changes to Print Spooler Guardian are recorded here.
 
 ## [Unreleased]
+ 
+## [2.3.0.0] - 2026-08-17
 
-## [2.2.0.0] - 2026-08-14
+- Added `RawPrinterResetter` to send raw PJL, Universal Exit Language (UEL), and ESC E reset sequences directly to printers via the Win32 Spooler API (`winspool.drv`), helping unhang host-based/GDI printers (e.g. HP LaserJet P1005) stuck in unclosed raster sessions.
+- Added `EnableRawPrinterReset` configuration setting in `app.config` to toggle hardware stream reset commands.
+
+### Fixed
+
+- Resolved an issue in `PrintJobDetector` where `Win32_PnPEntity` device IDs were queried using printer display names instead of actual PnP hardware instance IDs. Added dual-layer resolution via WMI and registry (`Enum\USBPRINT`) for reliable USB printer disable/enable resets.
 
 ### Changed
 
