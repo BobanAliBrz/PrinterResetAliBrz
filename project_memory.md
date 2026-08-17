@@ -63,6 +63,9 @@ Build the installer from the app directory:
 
 The output is `dist/PrintSpoolerGuardian_Setup_v<version>.exe`. For a release, create and push a matching Git tag and attach that installer to the GitHub Release. Use the release notes to state the user-visible changes and any compatibility impact.
 
+Whenever a build is made and published to GitHub, **also copy the installer executable to the deployment share:**
+`\\10.0.135.252\Ono_Kad\Setup novog racunara\Print Spooler Guardian`
+
 The next release artifact is `dist/PrintSpoolerGuardian_Setup_v2.3.0.0.exe`.
 
 ## Compatibility and Constraints
@@ -76,5 +79,6 @@ The next release artifact is `dist/PrintSpoolerGuardian_Setup_v2.3.0.0.exe`.
 ## Maintenance Rules
 
 - Update `changelog.md` for every user-visible, behavior-changing, or release-related change. Add unreleased work under `## [Unreleased]` before release; move it into a dated version section when publishing.
+- Whenever a release build is created, copy the resulting `dist/PrintSpoolerGuardian_Setup_v<version>.exe` to `\\10.0.135.252\Ono_Kad\Setup novog racunara\Print Spooler Guardian`.
 - Keep this file concise and current. Put detailed design rationale in `PrintSpoolerGuardian/DESIGN.md`, and release history in `changelog.md`.
 - Do not commit `publish/`, `dist/`, or release archives; release artifacts belong on GitHub Releases.

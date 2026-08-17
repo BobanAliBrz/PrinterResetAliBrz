@@ -156,6 +156,18 @@ if (-not $SkipBuild) {
 
 if (-not $SkipInstaller) {
     $installer = Compile-Installer $version
+
+    # Copy to deployment network share if accessible
+    $deployShare = "\\10.0.135.252\Ono_Kad\Setup novog racunara\Print Spooler Guardian"
+    if (Test-Path $deployShare) {
+        try {
+            Copy-Item -Path $installer -Destination $deployShare -Force
+            Log "  OK - Copied installer to deployment share: $deployShare"
+        } catch {
+            Log "  WARN - Could not copy to deployment share: $($_.Exception.Message)"
+        }
+    }
+
     Log ""
     Log "======= BUILD COMPLETE ======="
     Log "Version: ${version}"
